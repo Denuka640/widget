@@ -4,10 +4,14 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "electron .",
+    "dev:desktop": "concurrently -k \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "startup:install": "node scripts/register-startup.cjs",
+    "startup:remove": "node scripts/remove-startup.cjs"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
