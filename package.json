@@ -2,7 +2,10 @@
   "name": "widget",
   "private": true,
   "version": "0.0.0",
+  "description": "Floating desktop widget for Windows",
+  "author": "Widget Team",
   "type": "module",
+  "main": "electron.cjs",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
@@ -11,7 +14,27 @@
     "start": "electron .",
     "dev:desktop": "concurrently -k \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
     "startup:install": "node scripts/register-startup.cjs",
-    "startup:remove": "node scripts/remove-startup.cjs"
+    "startup:remove": "node scripts/remove-startup.cjs",
+    "package:win": "npm run build && electron-builder --win portable"
+  },
+  "build": {
+    "appId": "com.widget.desktop",
+    "productName": "DaylightWidget",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron.cjs",
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "artifactName": "DaylightWidget-${version}-portable.exe"
+    }
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
@@ -28,6 +51,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "concurrently": "^10.0.5",
     "electron": "^44.4.3",
+    "electron-builder": "^26.15.3",
     "oxlint": "^1.81.0",
     "typescript": "~6.0.2",
     "vite": "^8.3.0",

@@ -1,32 +1,62 @@
-# React + TypeScript + Vite
+﻿# DaylightWidget
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+A floating glassmorphism desktop widget built with React, Vite, and Electron for Windows.
 
-Currently, two official plugins are available:
+## Features
+- transparent desktop overlay
+- always-on-top frameless window
+- draggable widget on the desktop
+- no taskbar icon by default
+- optional Windows startup registration
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Run locally
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```powershell
+cd "D:\visual studio projects\widget"
+npm install
+npm start
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Run in development mode
+
+```powershell
+cd "D:\visual studio projects\widget"
+npm run dev
+```
+
+## Build the app
+
+```powershell
+cd "D:\visual studio projects\widget"
+npm run build
+```
+
+## Package a portable Windows EXE
+
+```powershell
+cd "D:\visual studio projects\widget"
+npm run package:win
+```
+
+The portable EXE is created in the release folder.
+
+## Optional startup on login
+
+```powershell
+cd "D:\visual studio projects\widget"
+npm run startup:install
+```
+
+To remove it:
+
+```powershell
+cd "D:\visual studio projects\widget"
+npm run startup:remove
+```
+
+## Why the EXE was failing before
+
+The earlier packaging error was caused by stale Electron or Node processes and an old release directory remaining locked from a previous build. Windows rejects the portable EXE packaging step when that temp folder is still in use, which produces the EPERM rename error. Closing the stale processes and removing the release folder resolves it.
+
+## Notes
+This app is intentionally designed as a desktop widget, not a regular taskbar app. The transparent window, `skipTaskbar`, and drag handling make it sit over the desktop while preserving the wallpaper behind it.

@@ -1,20 +1,44 @@
 const { app, BrowserWindow } = require('electron');
+const fs = require('node:fs');
 const path = require('node:path');
-const isDev = !app.isPackaged;
+const { spawn } = require('node:child_process');
+
+const appDir = __dirname;
+const distPath = path.join(appDir, 'dist', 'index.html');
+const hasBuiltApp = fs.existsSync(distPath);
+
+function startViteServer() {
+  const command = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+  const child = spawn(command, ['vite', '--host', '0.0.0.0'], {
+    cwd: appDir,
+    stdio: 'inherit',
+    shell: true,
+  });
+
+  child.on('exit', (code) => {
+    if (code !== 0) {
+      console.error('Vite dev server exited unexpectedly.');
+    }
+  });
+
+  return child;
+}
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 460,
-    height: 560,
-    minWidth: 320,
-    minHeight: 420,
+    width: 440,
+    height: 520,
+    minWidth: 280,
+    minHeight: 360,
     frame: false,
     transparent: true,
     resizable: false,
+    movable: true,
     alwaysOnTop: true,
     skipTaskbar: true,
     focusable: true,
     hasShadow: false,
+    show: false,
     backgroundColor: '#00000000',
     webPreferences: {
       contextIsolation: true,
@@ -23,13 +47,18 @@ function createWindow() {
   });
 
   win.setAlwaysOnTop(true, 'screen-saver');
-  win.loadURL(isDev ? 'http://localhost:5173' : `file://${path.join(__dirname, 'dist/index.html')}`);
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  win.show();
+  win.setOpacity(0.98);
 
-  win.webContents.on('did-fail-load', () => {
-    if (!isDev) return;
-    console.log('Failed to load app, continuing...');
+  if (hasBuiltApp) {
+    win.loadFile(distPath);
+  } else {
+    startViteServer();
+    win.loadURL('http://localhost:5173');
+  }
+
+  win.once('ready-to-show', () => {
+    win.show();
   });
 }
 
