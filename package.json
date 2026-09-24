@@ -26,6 +26,7 @@
     "files": [
       "dist/**/*",
       "electron.cjs",
+      "preload.cjs",
       "package.json",
       "node_modules/**/*"
     ],

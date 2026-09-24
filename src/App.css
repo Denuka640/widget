@@ -14,12 +14,9 @@
   background: linear-gradient(145deg, rgba(255,255,255,0.21), rgba(255,255,255,0.08));
   box-shadow: 0 28px 75px rgba(0,0,0,0.35), inset 0 1px rgba(255,255,255,0.18);
   backdrop-filter: blur(22px);
-  -webkit-app-region: drag;
+  user-select: none;
+  -webkit-user-select: none;
   animation: lift-in 0.7s ease both;
-}
-
-.widget-shell * {
-  -webkit-app-region: no-drag;
 }
 
 .widget-header,
@@ -68,13 +65,20 @@
   border: 0;
   background: transparent;
   cursor: pointer;
-  -webkit-app-region: no-drag;
 }
 
 .icon-button:hover,
 .volume-button:hover,
 .player-controls button:hover {
   color: #fff;
+}
+
+.drag-region {
+  cursor: grab;
+}
+
+.drag-region:active {
+  cursor: grabbing;
 }
 
 .clock-section {
@@ -175,7 +179,6 @@
   background: transparent;
   font-size: 11px;
   cursor: pointer;
-  -webkit-app-region: no-drag;
 }
 
 .mode-switch button.selected {
@@ -316,11 +319,6 @@
   color: rgba(255,255,255,0.42);
   border-top: 1px solid rgba(255,255,255,0.1);
   font-size: 10px;
-  -webkit-app-region: drag;
-}
-
-.widget-footer button {
-  -webkit-app-region: no-drag;
 }
 
 .status-dot {

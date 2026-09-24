@@ -1,62 +1,80 @@
 ﻿# DaylightWidget
 
-A floating glassmorphism desktop widget built with React, Vite, and Electron for Windows.
+A functional floating glassmorphism desktop widget for Windows, built with React, Vite, and Electron.
+
+The widget lives on the **desktop layer** (pinned to Windows' `Progman`), so it floats over your wallpaper but **never covers your other apps or desktop icons**. You can drag it anywhere and it remembers where you left it.
 
 ## Features
-- transparent desktop overlay
-- always-on-top frameless window
-- draggable widget on the desktop
-- no taskbar icon by default
+- pinned to the desktop layer — sits behind all other application windows
+- draggable by its header (grab the clock/header or the grip icon)
+- remembers its position between restarts
+- transparent, frameless, no taskbar icon
+- right-click the widget for options (Reset to center / Quit)
 - optional Windows startup registration
 
-## Run locally
+## Run the EXE (recommended)
+Double-click the portable app:
 
-```powershell
-cd "D:\visual studio projects\widget"
-npm install
-npm start
+```
+release\DaylightWidget-0.0.0-portable.exe
 ```
 
-## Run in development mode
+To close it: right-click anywhere on the widget → **Quit DaylightWidget**.
+
+It has no taskbar icon by design (it's a desktop widget, not an app window).
+
+## Run from source
 
 ```powershell
 cd "D:\visual studio projects\widget"
+npm start              # uses the built renderer (dist/)
+```
+
+Development mode (hot reload):
+
+```powershell
 npm run dev
 ```
 
-## Build the app
+## Build the EXE from source
 
 ```powershell
-cd "D:\visual studio projects\widget"
-npm run build
+npm run build          # type-check + bundle the renderer
+npm run package:win    # build + create the portable EXE in release/
 ```
 
-## Package a portable Windows EXE
+## Run automatically at startup (optional)
+
+After building the EXE, register it to launch on login:
 
 ```powershell
-cd "D:\visual studio projects\widget"
-npm run package:win
-```
-
-The portable EXE is created in the release folder.
-
-## Optional startup on login
-
-```powershell
-cd "D:\visual studio projects\widget"
 npm run startup:install
 ```
 
-To remove it:
+This creates a shortcut in the Startup folder pointing at the newest portable
+EXE in `release/`. If you moved the EXE elsewhere, point at it directly:
 
 ```powershell
-cd "D:\visual studio projects\widget"
+$env:WIDGET_EXE = "D:\path\to\DaylightWidget-0.0.0-portable.exe"
+npm run startup:install
+```
+
+To undo:
+
+```powershell
 npm run startup:remove
 ```
 
-## Why the EXE was failing before
-
-The earlier packaging error was caused by stale Electron or Node processes and an old release directory remaining locked from a previous build. Windows rejects the portable EXE packaging step when that temp folder is still in use, which produces the EPERM rename error. Closing the stale processes and removing the release folder resolves it.
+> Note: if you rebuild the EXE with a new version number (e.g.
+> `-0.0.1-portable.exe`), run `startup:install` again so the shortcut points to
+> the new file.
 
 ## Notes
-This app is intentionally designed as a desktop widget, not a regular taskbar app. The transparent window, `skipTaskbar`, and drag handling make it sit over the desktop while preserving the wallpaper behind it.
+- The widget window is re-parented onto the Windows desktop window
+  (`Progman`) using a small PowerShell shim, which is what keeps it behind
+  other apps while still being fully interactive and draggable. If that
+  re-parenting ever fails on an uncommon shell setup, it falls back to a plain
+  non-topmost frameless window that still works the same way.
+- Position is saved to `%APPDATA%\DaylightWidget\config.json`.
+- This app is intentionally designed as a desktop widget, not a regular
+  taskbar app: transparent window, skipped taskbar, and no window activation.
