@@ -1,21 +1,436 @@
 import { useEffect, useRef, useState } from 'react'
-import { CloudSun, GripVertical, Headphones, MapPin, Music2, Pause, Play, Settings2, SkipBack, SkipForward, SunMedium, Volume2 } from 'lucide-react'
+import {
+  Check,
+  Clock,
+  CloudDrizzle,
+  CloudFog,
+  CloudLightning,
+  CloudRain,
+  CloudSnow,
+  CloudSun,
+  Droplets,
+  GripHorizontal,
+  MapPin,
+  Music,
+  Palette,
+  Pause,
+  Play,
+  Power,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  Settings,
+  SkipBack,
+  SkipForward,
+  Sun,
+  Thermometer,
+  Volume2,
+  VolumeX,
+  Wind,
+  X,
+} from 'lucide-react'
 import './App.css'
+
+interface WeatherData {
+  temp: number
+  high: number
+  low: number
+  humidity: number
+  wind: number
+  code: number
+  city: string
+  isDay: boolean
+}
+
+type ClockType = 'digital' | 'analog'
+type ThemePreset = 'light_frosted' | 'dark_obsidian' | 'pixel_sunset' | 'emerald_mint' | 'cyber_violet' | 'custom'
+
+function getWeatherInfo(code: number) {
+  if (code === 0) return { label: 'Clear Sky', Icon: Sun, color: '#f6d365' }
+  if (code >= 1 && code <= 3) return { label: 'Partly Cloudy', Icon: CloudSun, color: '#4a90e2' }
+  if (code >= 45 && code <= 48) return { label: 'Foggy', Icon: CloudFog, color: '#7f8c8d' }
+  if (code >= 51 && code <= 67) return { label: 'Rain Drizzle', Icon: CloudDrizzle, color: '#2980b9' }
+  if (code >= 71 && code <= 77) return { label: 'Snowfall', Icon: CloudSnow, color: '#bdc3c7' }
+  if (code >= 80 && code <= 82) return { label: 'Heavy Rain', Icon: CloudRain, color: '#2980b9' }
+  if (code >= 95) return { label: 'Thunderstorm', Icon: CloudLightning, color: '#e67e22' }
+  return { label: 'Mild', Icon: CloudSun, color: '#4a90e2' }
+}
+
+function hexToRgba(hex: string, alpha: number) {
+  let c = hex.replace('#', '')
+  if (c.length === 3) {
+    c = c.split('').map((char) => char + char).join('')
+  }
+  const num = parseInt(c, 16) || 0
+  const r = (num >> 16) & 255
+  const g = (num >> 8) & 255
+  const b = num & 255
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+// Modern Material You Vector Analog Clock Component
+function AnalogClock({ time }: { time: Date }) {
+  const ms = time.getMilliseconds()
+  const sec = time.getSeconds() + ms / 1000
+  const min = time.getMinutes() + sec / 60
+  const hour = (time.getHours() % 12) + min / 60
+
+  const secAngle = sec * 6
+  const minAngle = min * 6
+  const hourAngle = hour * 30
+
+  return (
+    <div className="analog-clock-container">
+      <svg className="analog-clock-svg" viewBox="0 0 200 200">
+        <defs>
+          <filter id="clockShadow" x="-10%" y="-10%" width="120%" height="120%">
+            <feDropShadow dx="0" dy="3" stdDeviation="4" floodOpacity="0.18" />
+          </filter>
+          <linearGradient id="clockFaceGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="rgba(255, 255, 255, 0.45)" />
+            <stop offset="100%" stopColor="rgba(255, 255, 255, 0.15)" />
+          </linearGradient>
+        </defs>
+
+        {/* Outer Face */}
+        <circle cx="100" cy="100" r="90" fill="url(#clockFaceGrad)" stroke="rgba(255, 255, 255, 0.7)" strokeWidth="2" filter="url(#clockShadow)" />
+
+        {/* Hour markers (12 ticks) */}
+        {Array.from({ length: 12 }).map((_, i) => {
+          const angle = (i * 30 * Math.PI) / 180
+          const isMain = i % 3 === 0
+          const r1 = isMain ? 70 : 76
+          const r2 = 83
+          const x1 = 100 + r1 * Math.sin(angle)
+          const y1 = 100 - r1 * Math.cos(angle)
+          const x2 = 100 + r2 * Math.sin(angle)
+          const y2 = 100 - r2 * Math.cos(angle)
+          return (
+            <line
+              key={i}
+              x1={x1}
+              y1={y1}
+              x2={x2}
+              y2={y2}
+              stroke="var(--text-main)"
+              strokeWidth={isMain ? 3 : 1.5}
+              strokeLinecap="round"
+              opacity={isMain ? 0.85 : 0.45}
+            />
+          )
+        })}
+
+        {/* Hour Hand */}
+        <line
+          x1="100"
+          y1="100"
+          x2={100 + 46 * Math.sin((hourAngle * Math.PI) / 180)}
+          y2={100 - 46 * Math.cos((hourAngle * Math.PI) / 180)}
+          stroke="var(--text-main)"
+          strokeWidth="5.5"
+          strokeLinecap="round"
+        />
+
+        {/* Minute Hand */}
+        <line
+          x1="100"
+          y1="100"
+          x2={100 + 68 * Math.sin((minAngle * Math.PI) / 180)}
+          y2={100 - 68 * Math.cos((minAngle * Math.PI) / 180)}
+          stroke="var(--text-main)"
+          strokeWidth="3.5"
+          strokeLinecap="round"
+          opacity="0.9"
+        />
+
+        {/* Second Hand (Accent Color) */}
+        <line
+          x1={100 - 14 * Math.sin((secAngle * Math.PI) / 180)}
+          y1={100 + 14 * Math.cos((secAngle * Math.PI) / 180)}
+          x2={100 + 76 * Math.sin((secAngle * Math.PI) / 180)}
+          y2={100 - 76 * Math.cos((secAngle * Math.PI) / 180)}
+          stroke="var(--accent-cyan)"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+
+        {/* Center Cap */}
+        <circle cx="100" cy="100" r="5" fill="var(--accent-cyan)" stroke="var(--text-main)" strokeWidth="1.5" />
+      </svg>
+    </div>
+  )
+}
 
 function App() {
   const [time, setTime] = useState(new Date())
-  const [mode, setMode] = useState<'digital' | 'analog'>('digital')
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [is24Hour, setIs24Hour] = useState(false)
+
+  // Load saved preferences or defaults
+  const loadSavedPrefs = () => {
+    try {
+      const saved = localStorage.getItem('daylight_widget_prefs_v2')
+      if (saved) return JSON.parse(saved)
+    } catch {
+      /* ignore */
+    }
+    return null
+  }
+
+  const savedPrefs = loadSavedPrefs()
+
+  const [is24Hour, setIs24Hour] = useState<boolean>(savedPrefs?.is24Hour ?? false)
+  const [tempUnit, setTempUnit] = useState<'C' | 'F'>(savedPrefs?.tempUnit ?? 'C')
+  const [clockType, setClockType] = useState<ClockType>(savedPrefs?.clockType ?? 'digital')
+  const [clockTheme, setClockTheme] = useState<ThemePreset>(savedPrefs?.clockTheme ?? 'light_frosted')
+  const [customColor1, setCustomColor1] = useState<string>(savedPrefs?.customColor1 ?? '#ffffff')
+  const [customColor2, setCustomColor2] = useState<string>(savedPrefs?.customColor2 ?? '#dbeaff')
+  const [customOpacity, setCustomOpacity] = useState<number>(savedPrefs?.customOpacity ?? 0.78)
+  const [textColor, setTextColor] = useState<string>(savedPrefs?.textColor ?? '#1c1b1f')
+
+  // UI Modals
+  const [showSettings, setShowSettings] = useState(false)
+  const [showSearch, setShowSearch] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchError, setSearchError] = useState('')
+
+  // Weather State (Default to Sri Lanka if IP fails)
+  const [weather, setWeather] = useState<WeatherData>({
+    temp: 28,
+    high: 31,
+    low: 24,
+    humidity: 78,
+    wind: 14,
+    code: 1,
+    city: 'Colombo, LK',
+    isDay: true,
+  })
+  const [weatherLoading, setWeatherLoading] = useState(false)
+
+  // Live Media State (Real Spotify / System Media)
+  const [mediaInfo, setMediaInfo] = useState({
+    title: 'No media playing',
+    artist: 'Spotify / Media Player',
+    isPlaying: false,
+    app: '',
+  })
+  const [progress, setProgress] = useState(45)
+  const [isMuted, setIsMuted] = useState(false)
+
   const dragRef = useRef<{ active: boolean; lastX: number; lastY: number } | null>(null)
 
+  // Save preferences to localStorage & sync across all open widgets
+  const syncChannelRef = useRef<BroadcastChannel | null>(null)
+  const isSyncingRef = useRef(false)
+
+  const applyPrefs = (data: any) => {
+    if (!data) return
+    isSyncingRef.current = true
+    if (typeof data.is24Hour === 'boolean') setIs24Hour(data.is24Hour)
+    if (data.tempUnit === 'C' || data.tempUnit === 'F') setTempUnit(data.tempUnit)
+    if (data.clockType) setClockType(data.clockType)
+    if (data.clockTheme) setClockTheme(data.clockTheme)
+    if (data.customColor1) setCustomColor1(data.customColor1)
+    if (data.customColor2) setCustomColor2(data.customColor2)
+    if (typeof data.customOpacity === 'number') setCustomOpacity(data.customOpacity)
+    if (data.textColor) setTextColor(data.textColor)
+    setTimeout(() => {
+      isSyncingRef.current = false
+    }, 50)
+  }
+
+  // Initialize BroadcastChannel & IPC listeners for instant cross-widget sync
+  useEffect(() => {
+    try {
+      syncChannelRef.current = new BroadcastChannel('daylight_widget_prefs_sync')
+      syncChannelRef.current.onmessage = (e) => {
+        if (e.data && e.data.type === 'PREFS_SYNC') {
+          applyPrefs(e.data.payload)
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
+    if (window.widgetAPI?.onSettingsSync) {
+      window.widgetAPI.onSettingsSync((data) => {
+        applyPrefs(data)
+      })
+    }
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'daylight_widget_prefs_v2' && e.newValue) {
+        try {
+          applyPrefs(JSON.parse(e.newValue))
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
+    window.addEventListener('storage', handleStorageChange)
+    return () => {
+      window.removeEventListener('storage', handleStorageChange)
+      if (syncChannelRef.current) syncChannelRef.current.close()
+    }
+  }, [])
+
+  useEffect(() => {
+    const prefs = {
+      is24Hour,
+      tempUnit,
+      clockType,
+      clockTheme,
+      customColor1,
+      customColor2,
+      customOpacity,
+      textColor,
+    }
+    localStorage.setItem('daylight_widget_prefs_v2', JSON.stringify(prefs))
+
+    if (!isSyncingRef.current) {
+      try {
+        syncChannelRef.current?.postMessage({ type: 'PREFS_SYNC', payload: prefs })
+      } catch {
+        /* ignore */
+      }
+      window.widgetAPI?.syncSettings(prefs)
+    }
+  }, [is24Hour, tempUnit, clockType, clockTheme, customColor1, customColor2, customOpacity, textColor])
+
+  // Live Clock Interval
   useEffect(() => {
     const timer = window.setInterval(() => setTime(new Date()), 1000)
     return () => window.clearInterval(timer)
   }, [])
 
+  // Listen to REAL Spotify / Windows System Media Updates via IPC
+  useEffect(() => {
+    if (window.widgetAPI?.onLiveMediaUpdate) {
+      window.widgetAPI.onLiveMediaUpdate((data) => {
+        if (data && data.title) {
+          setMediaInfo({
+            title: data.title,
+            artist: data.artist || 'Spotify',
+            isPlaying: data.status === 'Playing',
+            app: data.app || '',
+          })
+        }
+      })
+    }
+  }, [])
+
+  // Media Progress Simulation
+  useEffect(() => {
+    let interval: number | undefined
+    if (mediaInfo.isPlaying) {
+      interval = window.setInterval(() => {
+        setProgress((prev) => (prev >= 100 ? 0 : prev + 1))
+      }, 1000)
+    }
+    return () => window.clearInterval(interval)
+  }, [mediaInfo.isPlaying])
+
+  // Fetch Weather by Lat / Lon
+  const fetchWeatherForCoords = async (lat: number, lon: number, cityName: string) => {
+    setWeatherLoading(true)
+    try {
+      const res = await fetch(
+        `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,is_day,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min&timezone=auto`
+      )
+      if (res.ok) {
+        const data = await res.json()
+        const current = data.current
+        const daily = data.daily
+
+        setWeather({
+          temp: Math.round(current.temperature_2m),
+          high: Math.round(daily.temperature_2m_max[0]),
+          low: Math.round(daily.temperature_2m_min[0]),
+          humidity: Math.round(current.relative_humidity_2m),
+          wind: Math.round(current.wind_speed_10m),
+          code: current.weather_code,
+          city: cityName,
+          isDay: current.is_day === 1,
+        })
+      }
+    } catch (err) {
+      console.error('Weather fetch error:', err)
+    } finally {
+      setWeatherLoading(false)
+    }
+  }
+
+  // Automatic Location Detection (Sri Lanka Default)
+  const detectLocationAndWeather = async () => {
+    setWeatherLoading(true)
+    try {
+      const ipRes = await fetch('https://ipwho.is/')
+      if (ipRes.ok) {
+        const ipData = await ipRes.json()
+        if (ipData.success && ipData.latitude && ipData.longitude) {
+          const locName = `${ipData.city || ipData.region}, ${ipData.country_code || 'LK'}`
+          await fetchWeatherForCoords(ipData.latitude, ipData.longitude, locName)
+          return
+        }
+      }
+
+      const geoRes = await fetch('https://get.geojs.io/v1/ip/geo.json')
+      if (geoRes.ok) {
+        const geoData = await geoRes.json()
+        if (geoData.latitude && geoData.longitude) {
+          const locName = `${geoData.city || 'Local'}, ${geoData.country_code || 'LK'}`
+          await fetchWeatherForCoords(parseFloat(geoData.latitude), parseFloat(geoData.longitude), locName)
+          return
+        }
+      }
+
+      await fetchWeatherForCoords(6.9271, 79.8612, 'Colombo, Sri Lanka')
+    } catch {
+      await fetchWeatherForCoords(6.9271, 79.8612, 'Colombo, Sri Lanka')
+    }
+  }
+
+  useEffect(() => {
+    detectLocationAndWeather()
+    const interval = window.setInterval(detectLocationAndWeather, 10 * 60 * 1000)
+    return () => window.clearInterval(interval)
+  }, [])
+
+  // City Search Handler
+  const handleCitySearch = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!searchQuery.trim()) return
+    setWeatherLoading(true)
+    setSearchError('')
+    try {
+      const geoRes = await fetch(
+        `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(searchQuery.trim())}&count=1&language=en&format=json`
+      )
+      if (geoRes.ok) {
+        const geoData = await geoRes.json()
+        if (geoData.results && geoData.results.length > 0) {
+          const loc = geoData.results[0]
+          await fetchWeatherForCoords(loc.latitude, loc.longitude, `${loc.name}, ${loc.country_code ? loc.country_code.toUpperCase() : ''}`)
+          setShowSearch(false)
+          setSearchQuery('')
+        } else {
+          setSearchError('City not found!')
+        }
+      }
+    } catch {
+      setSearchError('Failed to search city.')
+    } finally {
+      setWeatherLoading(false)
+    }
+  }
+
+  // System Media Controls IPC
+  const handleMediaControl = (action: 'playpause' | 'next' | 'prev') => {
+    setMediaInfo((prev) => ({ ...prev, isPlaying: action === 'playpause' ? !prev.isPlaying : prev.isPlaying }))
+    window.widgetAPI?.sendMediaControl(action)
+  }
+
   const handlePointerDown = (e: React.PointerEvent<HTMLElement>) => {
-    if ((e.target as HTMLElement).closest('.settings-button')) return
+    if ((e.target as HTMLElement).closest('button, input')) return
     dragRef.current = { active: true, lastX: e.screenX, lastY: e.screenY }
     try {
       e.currentTarget.setPointerCapture(e.pointerId)
@@ -44,37 +459,403 @@ function App() {
     }
   }
 
-  const hours = is24Hour ? time.getHours() : time.getHours() % 12 || 12
+  const displayTemp = (c: number) => (tempUnit === 'C' ? `${c}°C` : `${Math.round((c * 9) / 5 + 32)}°F`)
+  const hours = is24Hour ? time.getHours().toString().padStart(2, '0') : (time.getHours() % 12 || 12).toString().padStart(2, '0')
   const minutes = time.getMinutes().toString().padStart(2, '0')
   const seconds = time.getSeconds().toString().padStart(2, '0')
   const meridiem = time.getHours() >= 12 ? 'PM' : 'AM'
+  const dateStr = time.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
+
+  const weatherInfo = getWeatherInfo(weather.code)
+  const WeatherIcon = weatherInfo.Icon
+
+  // Dynamic Glass Theme Styling Calculation
+  const getWidgetThemeStyles = (): React.CSSProperties => {
+    if (clockTheme === 'dark_obsidian') {
+      return {
+        '--glass-bg': 'linear-gradient(135deg, rgba(26, 28, 44, 0.88), rgba(14, 16, 28, 0.82))',
+        '--card-bg': 'rgba(255, 255, 255, 0.08)',
+        '--card-hover-bg': 'rgba(255, 255, 255, 0.14)',
+        '--glass-border': '1px solid rgba(255, 255, 255, 0.18)',
+        '--text-main': '#ffffff',
+        '--text-muted': 'rgba(255, 255, 255, 0.7)',
+        '--accent-cyan': '#70a1ff',
+      } as React.CSSProperties
+    }
+    if (clockTheme === 'pixel_sunset') {
+      return {
+        '--glass-bg': 'linear-gradient(135deg, rgba(255, 210, 195, 0.88), rgba(255, 170, 190, 0.80))',
+        '--card-bg': 'rgba(255, 255, 255, 0.52)',
+        '--card-hover-bg': 'rgba(255, 255, 255, 0.72)',
+        '--glass-border': '1px solid rgba(255, 255, 255, 0.9)',
+        '--text-main': '#3d1624',
+        '--text-muted': '#6b3648',
+        '--accent-cyan': '#d53f8c',
+      } as React.CSSProperties
+    }
+    if (clockTheme === 'emerald_mint') {
+      return {
+        '--glass-bg': 'linear-gradient(135deg, rgba(195, 245, 225, 0.88), rgba(165, 230, 210, 0.80))',
+        '--card-bg': 'rgba(255, 255, 255, 0.52)',
+        '--card-hover-bg': 'rgba(255, 255, 255, 0.72)',
+        '--glass-border': '1px solid rgba(255, 255, 255, 0.9)',
+        '--text-main': '#0f3a2e',
+        '--text-muted': '#2c6353',
+        '--accent-cyan': '#2f855a',
+      } as React.CSSProperties
+    }
+    if (clockTheme === 'cyber_violet') {
+      return {
+        '--glass-bg': 'linear-gradient(135deg, rgba(230, 215, 255, 0.88), rgba(195, 200, 255, 0.80))',
+        '--card-bg': 'rgba(255, 255, 255, 0.52)',
+        '--card-hover-bg': 'rgba(255, 255, 255, 0.72)',
+        '--glass-border': '1px solid rgba(255, 255, 255, 0.9)',
+        '--text-main': '#1e1b4b',
+        '--text-muted': '#4338ca',
+        '--accent-cyan': '#6366f1',
+      } as React.CSSProperties
+    }
+    if (clockTheme === 'custom') {
+      const isLightText = textColor === '#ffffff'
+      return {
+        '--glass-bg': `linear-gradient(135deg, ${hexToRgba(customColor1, customOpacity)}, ${hexToRgba(customColor2, customOpacity)})`,
+        '--card-bg': isLightText ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.52)',
+        '--card-hover-bg': isLightText ? 'rgba(255, 255, 255, 0.22)' : 'rgba(255, 255, 255, 0.72)',
+        '--glass-border': isLightText ? '1px solid rgba(255, 255, 255, 0.22)' : '1px solid rgba(255, 255, 255, 0.85)',
+        '--text-main': textColor,
+        '--text-muted': isLightText ? 'rgba(255, 255, 255, 0.75)' : 'rgba(50, 50, 50, 0.75)',
+        '--accent-cyan': isLightText ? '#60a5fa' : '#2563eb',
+      } as React.CSSProperties
+    }
+
+    // Default Light Frosted Glass
+    return {
+      '--glass-bg': 'linear-gradient(135deg, rgba(255, 255, 255, 0.78), rgba(236, 242, 255, 0.68))',
+      '--card-bg': 'rgba(255, 255, 255, 0.55)',
+      '--card-hover-bg': 'rgba(255, 255, 255, 0.75)',
+      '--glass-border': '1px solid rgba(255, 255, 255, 0.85)',
+      '--text-main': '#1c1b1f',
+      '--text-muted': '#49454f',
+      '--accent-cyan': '#2b6cb0',
+    } as React.CSSProperties
+  }
+
+  const resetSettings = () => {
+    setIs24Hour(false)
+    setTempUnit('C')
+    setClockType('digital')
+    setClockTheme('light_frosted')
+    setCustomColor1('#ffffff')
+    setCustomColor2('#dbeaff')
+    setCustomOpacity(0.78)
+    setTextColor('#1c1b1f')
+    localStorage.removeItem('daylight_widget_prefs_v2')
+  }
 
   return (
-    <main className="desktop-stage">
-      <section className="widget-shell" aria-label="Frosted glass desktop widget">
+    <main className="pixel-glass-stage">
+      <div className="pixel-glass-widget" style={getWidgetThemeStyles()}>
+        {/* Header Ribbon / At-a-Glance Pill */}
         <header
-          className="widget-header drag-region"
+          className="widget-header-bar drag-region"
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerEnd}
           onPointerCancel={handlePointerEnd}
         >
-          <div className="brand-lockup"><span className="brand-mark"><SunMedium size={16} /></span><span>Daylight</span></div>
-          <div className="header-actions"><button className="icon-button grip-handle" aria-label="Move widget"><GripVertical size={18} /></button><button className="icon-button settings-button" aria-label="Right-click the widget to quit"><Settings2 size={17} /></button></div>
+          <div className="pixel-at-a-glance">
+            <span className="at-date">{dateStr}</span>
+            <span className="at-sep">•</span>
+            <span className="at-weather">
+              <WeatherIcon size={14} style={{ color: weatherInfo.color }} /> {displayTemp(weather.temp)}
+            </span>
+          </div>
+
+          <div className="drag-handle-pill">
+            <GripHorizontal size={14} />
+          </div>
+
+          <div className="header-quick-toggles">
+            <button className="glass-pill-btn" onClick={() => setTempUnit(tempUnit === 'C' ? 'F' : 'C')} title="Toggle Temperature Unit">
+              °{tempUnit}
+            </button>
+            <button className="glass-pill-btn" onClick={detectLocationAndWeather} disabled={weatherLoading} title="Refresh Location & Weather">
+              <RefreshCw size={12} className={weatherLoading ? 'spin' : ''} />
+            </button>
+            <button
+              className={`glass-pill-btn ${showSettings ? 'active' : ''}`}
+              onClick={() => setShowSettings(!showSettings)}
+              title="Settings & Appearance"
+            >
+              <Settings size={12} />
+            </button>
+          </div>
         </header>
-        <section className="clock-section"><div className="section-label"><span>LOCAL TIME</span><span className="live-dot">LIVE</span></div>{mode === 'digital' ? <div className="digital-clock"><span>{hours}:{minutes}</span><small>{seconds} <b>{meridiem}</b></small></div> : <AnalogClock time={time} />}<div className="clock-meta"><MapPin size={14} /> Seattle, WA <span className="meta-divider">•</span> Monday, September 22</div><div className="mode-switch" role="group" aria-label="Clock style"><button className={mode === 'digital' ? 'selected' : ''} onClick={() => setMode('digital')}>Digital</button><button className={mode === 'analog' ? 'selected' : ''} onClick={() => setMode('analog')}>Analog</button></div></section>
-        <div className="info-grid"><section className="info-card weather-card"><div className="card-heading"><span>WEATHER</span><CloudSun size={16} /></div><div className="weather-main"><div><strong>68°</strong><span>Partly cloudy</span></div><div className="weather-icon"><CloudSun size={42} strokeWidth={1.3} /></div></div><div className="weather-range"><span>H 72°</span><span>L 54°</span><span>Feels like 67°</span></div></section><section className="info-card music-card"><div className="card-heading"><span>NOW PLAYING</span><Headphones size={16} /></div><div className="track"><div className="album-art"><Music2 size={20} /></div><div className="track-copy"><strong>Dreams</strong><span>Fleetwood Mac</span></div><button className="volume-button" aria-label="Volume"><Volume2 size={16} /></button></div><div className="progress"><span></span></div><div className="player-controls"><button aria-label="Previous track"><SkipBack size={16} fill="currentColor" /></button><button className="play-button" onClick={() => setIsPlaying(!isPlaying)} aria-label={isPlaying ? 'Pause' : 'Play'}>{isPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</button><button aria-label="Next track"><SkipForward size={16} fill="currentColor" /></button></div></section></div>
-        <footer className="widget-footer"><span><span className="status-dot"></span> Updated just now</span><button onClick={() => setIs24Hour(!is24Hour)}>{is24Hour ? '24-hour time' : '12-hour time'}</button></footer>
-      </section>
+
+        {/* Settings & Customization Drawer Modal */}
+        {showSettings && (
+          <section className="glass-card settings-drawer-card">
+            <div className="drawer-header">
+              <div className="drawer-title">
+                <Palette size={15} /> <span>Settings & Theme</span>
+              </div>
+              <button className="glass-pill-btn sm" onClick={() => setShowSettings(false)}>
+                <X size={12} />
+              </button>
+            </div>
+
+            {/* Clock Type Toggle */}
+            <div className="settings-group">
+              <label className="settings-label">
+                <Clock size={13} /> Clock Style
+              </label>
+              <div className="segmented-control">
+                <button
+                  className={`segmented-btn ${clockType === 'digital' ? 'active' : ''}`}
+                  onClick={() => setClockType('digital')}
+                >
+                  Digital Clock
+                </button>
+                <button
+                  className={`segmented-btn ${clockType === 'analog' ? 'active' : ''}`}
+                  onClick={() => setClockType('analog')}
+                >
+                  Modern Analog
+                </button>
+              </div>
+            </div>
+
+            {/* Theme Presets */}
+            <div className="settings-group">
+              <label className="settings-label">
+                <Palette size={13} /> Color & Glass Preset
+              </label>
+              <div className="theme-presets-grid">
+                <button
+                  className={`preset-chip ${clockTheme === 'light_frosted' ? 'active' : ''}`}
+                  onClick={() => setClockTheme('light_frosted')}
+                >
+                  <span className="chip-swatch light-swatch"></span> Light Frosted
+                </button>
+                <button
+                  className={`preset-chip ${clockTheme === 'dark_obsidian' ? 'active' : ''}`}
+                  onClick={() => setClockTheme('dark_obsidian')}
+                >
+                  <span className="chip-swatch dark-swatch"></span> Obsidian
+                </button>
+                <button
+                  className={`preset-chip ${clockTheme === 'pixel_sunset' ? 'active' : ''}`}
+                  onClick={() => setClockTheme('pixel_sunset')}
+                >
+                  <span className="chip-swatch sunset-swatch"></span> Sunset
+                </button>
+                <button
+                  className={`preset-chip ${clockTheme === 'emerald_mint' ? 'active' : ''}`}
+                  onClick={() => setClockTheme('emerald_mint')}
+                >
+                  <span className="chip-swatch mint-swatch"></span> Mint
+                </button>
+                <button
+                  className={`preset-chip ${clockTheme === 'cyber_violet' ? 'active' : ''}`}
+                  onClick={() => setClockTheme('cyber_violet')}
+                >
+                  <span className="chip-swatch violet-swatch"></span> Violet
+                </button>
+                <button
+                  className={`preset-chip ${clockTheme === 'custom' ? 'active' : ''}`}
+                  onClick={() => setClockTheme('custom')}
+                >
+                  <span className="chip-swatch custom-swatch"></span> Custom
+                </button>
+              </div>
+            </div>
+
+            {/* Custom Color & Gradient Controls */}
+            {clockTheme === 'custom' && (
+              <div className="settings-group custom-color-controls">
+                <div className="color-picker-row">
+                  <div className="color-picker-item">
+                    <span>Gradient 1</span>
+                    <input type="color" value={customColor1} onChange={(e) => setCustomColor1(e.target.value)} />
+                  </div>
+                  <div className="color-picker-item">
+                    <span>Gradient 2</span>
+                    <input type="color" value={customColor2} onChange={(e) => setCustomColor2(e.target.value)} />
+                  </div>
+                  <div className="color-picker-item">
+                    <span>Text Color</span>
+                    <select value={textColor} onChange={(e) => setTextColor(e.target.value)} className="select-pill">
+                      <option value="#1c1b1f">Dark Text</option>
+                      <option value="#ffffff">Light Text</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="slider-row">
+                  <span>Glass Opacity ({Math.round(customOpacity * 100)}%)</span>
+                  <input
+                    type="range"
+                    min="0.3"
+                    max="0.95"
+                    step="0.05"
+                    value={customOpacity}
+                    onChange={(e) => setCustomOpacity(parseFloat(e.target.value))}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Extra Controls */}
+            <div className="drawer-footer-actions">
+              <button className="glass-pill-btn sm danger" onClick={resetSettings}>
+                <RotateCcw size={11} /> Reset Defaults
+              </button>
+            </div>
+          </section>
+        )}
+
+        {/* Hero Clock Card (Digital OR Modern Analog) */}
+        <section className="glass-card hero-clock-card">
+          {clockType === 'analog' ? (
+            <div className="analog-hero-wrapper">
+              <AnalogClock time={time} />
+              <div className="analog-time-digital-sub">
+                <span>
+                  {hours}:{minutes} <small>{seconds}</small> {!is24Hour && meridiem}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="clock-time-wrapper">
+              <span className="pixel-big-digits">{hours}:{minutes}</span>
+              <div className="clock-sub-digits">
+                <span className="clock-sec-badge">{seconds}</span>
+                {!is24Hour && <span className="clock-ampm-badge">{meridiem}</span>}
+              </div>
+            </div>
+          )}
+
+          <div className="clock-footer-row">
+            <button className="location-tag-btn" onClick={() => setShowSearch(!showSearch)} title="Search city">
+              <MapPin size={13} /> <span>{weather.city}</span> <Search size={10} className="search-icon-hint" />
+            </button>
+
+            {clockType === 'digital' && (
+              <button className="glass-pill-btn sm" onClick={() => setIs24Hour(!is24Hour)}>
+                {is24Hour ? '24-HOUR' : '12-HOUR'}
+              </button>
+            )}
+          </div>
+
+          {/* Interactive City Search Dropdown */}
+          {showSearch && (
+            <form className="city-search-box" onSubmit={handleCitySearch}>
+              <input
+                type="text"
+                className="city-input"
+                placeholder="Type city (e.g. Colombo, Paris)..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                autoFocus
+              />
+              <button type="submit" className="glass-pill-btn sm accent">
+                <Check size={12} />
+              </button>
+              <button type="button" className="glass-pill-btn sm" onClick={() => setShowSearch(false)}>
+                <X size={12} />
+              </button>
+            </form>
+          )}
+          {searchError && <div className="search-err-msg">{searchError}</div>}
+        </section>
+
+        {/* Live Weather Card */}
+        <section className="glass-card weather-hero-card">
+          <div className="weather-header-row">
+            <div className="weather-condition-lockup">
+              <WeatherIcon size={32} style={{ color: weatherInfo.color }} />
+              <div>
+                <span className="weather-temp-hero">{displayTemp(weather.temp)}</span>
+                <span className="weather-desc">{weatherInfo.label}</span>
+              </div>
+            </div>
+
+            <div className="weather-hl">
+              <span>H {displayTemp(weather.high)}</span>
+              <span>L {displayTemp(weather.low)}</span>
+            </div>
+          </div>
+
+          <div className="weather-details-grid">
+            <div className="weather-detail-item">
+              <Droplets size={13} />
+              <span>Humidity</span>
+              <strong>{weather.humidity}%</strong>
+            </div>
+            <div className="weather-detail-item">
+              <Wind size={13} />
+              <span>Wind</span>
+              <strong>{weather.wind} km/h</strong>
+            </div>
+            <div className="weather-detail-item">
+              <Thermometer size={13} />
+              <span>Unit</span>
+              <strong>Celsius (°C)</strong>
+            </div>
+          </div>
+        </section>
+
+        {/* Real-time Spotify / System Media Player */}
+        <section className="glass-card media-player-card">
+          <div className="media-top-info">
+            <div className={`media-art-container ${mediaInfo.isPlaying ? 'pulse-art' : ''}`}>
+              <Music size={18} className="media-art-icon" />
+            </div>
+
+            <div className="media-meta-text">
+              <span className="media-title">{mediaInfo.title}</span>
+              <span className="media-artist">{mediaInfo.artist}</span>
+            </div>
+
+            <button className="media-icon-btn" onClick={() => setIsMuted(!isMuted)}>
+              {isMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}
+            </button>
+          </div>
+
+          {/* Progress Seekbar */}
+          <div className="media-progress-bar">
+            <div className="media-progress-fill" style={{ width: `${progress}%` }}></div>
+          </div>
+
+          {/* Controls connected to Spotify & System Media */}
+          <div className="media-controls-row">
+            <button className="media-ctrl-btn" onClick={() => handleMediaControl('prev')} title="Previous Track">
+              <SkipBack size={16} />
+            </button>
+
+            <button className="media-play-btn" onClick={() => handleMediaControl('playpause')} title="Play / Pause">
+              {mediaInfo.isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" className="play-icon-offset" />}
+            </button>
+
+            <button className="media-ctrl-btn" onClick={() => handleMediaControl('next')} title="Next Track">
+              <SkipForward size={16} />
+            </button>
+          </div>
+        </section>
+
+        {/* Footer */}
+        <footer className="pixel-glass-footer">
+          <span>Pixel Glass Widget</span>
+          <span>Right-Click Menu</span>
+        </footer>
+      </div>
     </main>
   )
 }
 
-function AnalogClock({ time }: { time: Date }) {
-  const hourAngle = (time.getHours() % 12) * 30 + time.getMinutes() * 0.5
-  const minuteAngle = time.getMinutes() * 6
-  const secondAngle = time.getSeconds() * 6
-  return <div className="analog-clock"><span className="clock-number n12">12</span><span className="clock-number n3">3</span><span className="clock-number n6">6</span><span className="clock-number n9">9</span><span className="hand hour" style={{ transform: `rotate(${hourAngle}deg)` }} /><span className="hand minute" style={{ transform: `rotate(${minuteAngle}deg)` }} /><span className="hand second" style={{ transform: `rotate(${secondAngle}deg)` }} /><span className="clock-center" /></div>
-}
-
 export default App
+
+
+
+
+

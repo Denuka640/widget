@@ -3,14 +3,22 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled Rejection:', reason);
+});
+
 const isWin = process.platform === 'win32';
 const appDir = __dirname;
 const distPath = path.join(appDir, 'dist', 'index.html');
 const hasBuiltApp = fs.existsSync(distPath);
 const WIDGET_W = 440;
-const WIDGET_H = 520;
+const WIDGET_H = 740;
 
-let mainWindow = null;
+let mainWindows = [];
 let saveTimer = null;
 
 app.setName('DaylightWidget');
@@ -32,84 +40,31 @@ function startViteServer() {
   return child;
 }
 
-// Pins the widget window to the Windows desktop layer (inside Progman), so it
-// floats over the wallpaper but stays BEHIND every other application window
-// and behind the desktop icons. Uses the standard 0x052C / WorkerW technique.
-const PIN_SCRIPT = String.raw`
-param([long]$widgetHwnd)
-$ErrorActionPreference = 'Stop'
-Add-Type -TypeDefinition @"
-using System;
-using System.Runtime.InteropServices;
-public static class DeskPin {
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern IntPtr FindWindow(string cls, string name);
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, uint fuFlags, uint uTimeout, out IntPtr lpdwResult);
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern bool SetParent(IntPtr hWndChild, IntPtr hWndNewParent);
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
-}
-"@
-
-$widget = [IntPtr]$widgetHwnd
-$progman = [DeskPin]::FindWindow('Progman', $null)
-if ($progman -eq [IntPtr]::Zero) {
-    Write-Output 'NO_PROGMAN'
-    exit 1
-}
-
-$out = [IntPtr]::Zero
-$null = [DeskPin]::SendMessageTimeout($progman, 0x052C, [IntPtr]0x0000000D, [IntPtr]::Zero, 0x00000002, 1000, [ref]$out)
-[void][DeskPin]::SetParent($widget, $progman)
-[void][DeskPin]::SetWindowPos($widget, [IntPtr]1, 0, 0, 0, 0, 0x0003 -bor 0x0010)
-
-Write-Output 'PINNED'
-`;
-
-function pinToDesktop(win) {
-  return new Promise((resolve) => {
-    if (!isWin) return resolve(false);
-    const handleBuf = win.getNativeWindowHandle();
-    if (!handleBuf || handleBuf.length < 4) return resolve(false);
-    const hwnd = handleBuf.length >= 8 ? Number(handleBuf.readBigUInt64LE(0)) : handleBuf.readUInt32LE(0);
-
-    const userData = app.getPath('userData');
-    const scriptPath = path.join(userData, 'pin-to-desktop.ps1');
-    try {
-      fs.writeFileSync(scriptPath, PIN_SCRIPT, 'utf8');
-    } catch {
-      return resolve(false);
-    }
-
-    const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, String(hwnd)], { windowsHide: true });
-    let stdout = '';
-    ps.stdout.on('data', (d) => (stdout += d.toString()));
-    ps.on('error', () => resolve(false));
-    ps.on('close', (code) => resolve(code === 0 && stdout.includes('PINNED')));
-  });
-}
-
 const configPath = path.join(app.getPath('userData'), 'config.json');
 
 function loadState() {
   try {
     const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    if (typeof cfg.x === 'number' && typeof cfg.y === 'number') return { x: cfg.x, y: cfg.y };
-    return null;
+    return cfg || {};
   } catch {
-    return null;
+    return {};
   }
 }
 
 function saveStateNow() {
   clearTimeout(saveTimer);
   saveTimer = null;
-  if (!mainWindow) return;
-  const [x, y] = mainWindow.getPosition();
+  const states = loadState();
+  let updated = false;
+  for (const win of mainWindows) {
+    if (win.isDestroyed() || !win._displayId) continue;
+    const [x, y] = win.getPosition();
+    states[win._displayId] = { x, y };
+    updated = true;
+  }
+  if (!updated) return;
   try {
-    fs.writeFileSync(configPath, JSON.stringify({ x, y }), 'utf8');
+    fs.writeFileSync(configPath, JSON.stringify(states), 'utf8');
   } catch {
     /* ignore */
   }
@@ -139,90 +94,200 @@ function clampToScreens(x, y) {
   return { x: Math.round(nx), y: Math.round(ny) };
 }
 
-function createWindow() {
-  const saved = loadState();
-
-  mainWindow = new BrowserWindow({
-    width: WIDGET_W,
-    height: WIDGET_H,
-    ...(saved ? { x: saved.x, y: saved.y } : {}),
-    minWidth: WIDGET_W,
-    minHeight: WIDGET_H,
-    frame: false,
-    transparent: true,
-    resizable: false,
-    alwaysOnTop: false,
-    skipTaskbar: true,
-    focusable: false,
-    hasShadow: false,
-    show: false,
-    backgroundColor: '#00000000',
-    webPreferences: {
-      preload: path.join(appDir, 'preload.cjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
-
-  mainWindow.on('move', scheduleSave);
-  mainWindow.on('close', saveStateNow);
-
-  if (hasBuiltApp) {
-    mainWindow.loadFile(distPath);
-  } else {
-    startViteServer();
-    mainWindow.loadURL('http://localhost:5173');
+// Live Windows Media Transport Controls (GSMTC) Query Script
+const GSMTC_SCRIPT = String.raw`
+[cmdletbinding()]
+param()
+try {
+  Add-Type -AssemblyName System.Runtime.WindowsRuntime -ErrorAction Stop
+  $asyncOp = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]::RequestAsync()
+  $i = 0
+  while ($asyncOp.Status -eq 'Started' -and $i -lt 20) { Start-Sleep -Milliseconds 50; $i++ }
+  if ($asyncOp.Status -eq 'Completed') {
+    $mgr = $asyncOp.GetResults()
+    $session = $mgr.GetCurrentSession()
+    if ($session -ne $null) {
+      $mediaOp = $session.TryGetMediaPropertiesAsync()
+      $j = 0
+      while ($mediaOp.Status -eq 'Started' -and $j -lt 20) { Start-Sleep -Milliseconds 50; $j++ }
+      if ($mediaOp.Status -eq 'Completed') {
+        $props = $mediaOp.GetResults()
+        $pb = $session.GetPlaybackInfo()
+        $res = @{
+          title = [string]$props.Title
+          artist = [string]$props.Artist
+          app = [string]$session.SourceAppUserModelId
+          status = [string]$pb.PlaybackStatus.ToString()
+        }
+        $res | ConvertTo-Json -Compress
+        exit 0
+      }
+    }
   }
+} catch {}
+Write-Output "{}"
+`;
 
-  mainWindow.webContents.on('context-menu', () => {
-    if (!mainWindow) return;
-    const menu = Menu.buildFromTemplate([
-      { label: 'Reset to center of screen', click: () => mainWindow.center(), },
-      { type: 'separator' },
-      { label: 'Quit DaylightWidget', click: () => app.quit() },
-    ]);
-    menu.popup({ window: mainWindow });
-  });
-
-  let finalized = false;
-  const finalizeShow = () => {
-    if (finalized || !mainWindow) return;
-    finalized = true;
-    mainWindow.setAlwaysOnTop(false);
-    mainWindow.showInactive();
-  };
-
-  const pinTimer = setTimeout(finalizeShow, 12000);
-
-  mainWindow.once('ready-to-show', () => {
-    if (isWin) {
-      pinToDesktop(mainWindow)
-        .then(() => {
-          clearTimeout(pinTimer);
-          finalizeShow();
-        })
-        .catch(() => finalizeShow());
-    } else {
-      clearTimeout(pinTimer);
-      finalizeShow();
+function pollLiveMedia() {
+  if (!isWin || mainWindows.length === 0) return;
+  const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', GSMTC_SCRIPT], { windowsHide: true });
+  let out = '';
+  ps.stdout.on('data', (d) => (out += d.toString()));
+  ps.on('close', () => {
+    try {
+      const data = JSON.parse(out.trim());
+      if (data && data.title) {
+        mainWindows.forEach((win) => {
+          if (!win.isDestroyed()) {
+            win.webContents.send('media:live-update', data);
+          }
+        });
+      }
+    } catch {
+      /* ignore */
     }
   });
 }
 
+function createWindow() {
+  const saved = loadState();
+  const displays = screen.getAllDisplays();
+
+  if (!hasBuiltApp) {
+    startViteServer();
+  }
+
+  displays.forEach((display) => {
+    const displaySaved = saved[display.id];
+    
+    const defaultX = display.workArea.x + Math.floor((display.workArea.width - WIDGET_W) / 2);
+    const defaultY = display.workArea.y + Math.floor((display.workArea.height - WIDGET_H) / 2);
+
+    const initialX = displaySaved && typeof displaySaved.x === 'number' ? displaySaved.x : defaultX;
+    const initialY = displaySaved && typeof displaySaved.y === 'number' ? displaySaved.y : defaultY;
+
+    const pos = clampToScreens(initialX, initialY);
+
+    const win = new BrowserWindow({
+      width: WIDGET_W,
+      height: WIDGET_H,
+      x: pos.x,
+      y: pos.y,
+      minWidth: 360,
+      minHeight: 480,
+      frame: false,
+      transparent: true,
+      resizable: true,
+      alwaysOnTop: false,
+      skipTaskbar: true,
+      focusable: true,
+      hasShadow: false,
+      show: true,
+      backgroundColor: '#00000000',
+      webPreferences: {
+        preload: path.join(appDir, 'preload.cjs'),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    
+    win._displayId = display.id;
+    mainWindows.push(win);
+
+    win.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+      console.error('Failed to load page:', errorCode, errorDescription);
+    });
+
+    win.on('move', scheduleSave);
+    win.on('close', () => {
+      saveStateNow();
+      mainWindows = mainWindows.filter(w => w !== win);
+    });
+
+    if (hasBuiltApp) {
+      win.loadFile(distPath);
+    } else {
+      win.loadURL('http://localhost:5173');
+    }
+
+    win.webContents.on('context-menu', () => {
+      if (win.isDestroyed()) return;
+      const menu = Menu.buildFromTemplate([
+        { label: 'Reset to center of screen', click: () => {
+            const d = screen.getDisplayNearestPoint({ x: win.getPosition()[0], y: win.getPosition()[1] });
+            win.setPosition(d.workArea.x + Math.floor((d.workArea.width - WIDGET_W) / 2), d.workArea.y + Math.floor((d.workArea.height - WIDGET_H) / 2));
+        }},
+        { type: 'separator' },
+        { label: 'Quit DaylightWidget', click: () => app.quit() },
+      ]);
+      menu.popup({ window: win });
+    });
+
+    win.once('ready-to-show', () => {
+      if (win.isDestroyed()) return;
+      win.show();
+      win.focus();
+    });
+  });
+}
+
 app.on('second-instance', () => {
-  if (!mainWindow) return;
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.showInactive();
+  mainWindows.forEach(win => {
+    if (win.isDestroyed()) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  });
 });
 
 ipcMain.on('widget:move', (event, payload) => {
-  if (!mainWindow) return;
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return;
   const dx = Number(payload && payload.dx) || 0;
   const dy = Number(payload && payload.dy) || 0;
-  const [x, y] = mainWindow.getPosition();
+  const [x, y] = win.getPosition();
   const p = clampToScreens(x + dx, y + dy);
-  mainWindow.setPosition(p.x, p.y);
+  win.setPosition(p.x, p.y);
   scheduleSave();
+});
+
+ipcMain.on('media:control', (event, action) => {
+  if (!isWin) return;
+  const keyMap = { playpause: 179, next: 176, prev: 177 };
+  const vk = keyMap[action];
+  if (vk) {
+    const psCmd = `(New-Object -ComObject WScript.Shell).SendKeys([char]${vk})`;
+    spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psCmd], { windowsHide: true });
+  }
+});
+
+ipcMain.on('settings:sync', (event, payload) => {
+  mainWindows.forEach((win) => {
+    if (!win.isDestroyed() && win.webContents !== event.sender) {
+      win.webContents.send('settings:sync', payload);
+    }
+  });
+});
+
+ipcMain.handle('autostart:get', () => {
+  try {
+    return app.getLoginItemSettings().openAtLogin;
+  } catch {
+    return false;
+  }
+});
+
+ipcMain.handle('autostart:set', (event, openAtLogin) => {
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: Boolean(openAtLogin),
+      path: process.execPath,
+      args: ['--autostart'],
+    });
+    return app.getLoginItemSettings().openAtLogin;
+  } catch {
+    return false;
+  }
 });
 
 const gotLock = app.requestSingleInstanceLock();
@@ -231,6 +296,9 @@ if (!gotLock) {
 } else {
   app.whenReady().then(() => {
     createWindow();
+
+    // Start live system media polling every 3 seconds
+    setInterval(pollLiveMedia, 3000);
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
