@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
   ChevronRight,
@@ -43,6 +43,13 @@ interface WeatherData {
   isDay: boolean
 }
 
+interface MediaTrack {
+  title: string
+  artist: string
+  app: string
+  isPlaying: boolean
+}
+
 type ClockType = 'digital' | 'analog'
 type ThemePreset = 'light_frosted' | 'dark_obsidian' | 'pixel_sunset' | 'emerald_mint' | 'cyber_violet' | 'custom'
 
@@ -69,8 +76,24 @@ function hexToRgba(hex: string, alpha: number) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
-// Modern Material You Vector Analog Clock Component
-function AnalogClock({ time }: { time: Date }) {
+// Pre-computed static tick angles for Analog Clock face (prevents dynamic allocations)
+const CLOCK_TICKS = Array.from({ length: 12 }).map((_, i) => {
+  const angle = (i * 30 * Math.PI) / 180
+  const isMain = i % 3 === 0
+  const r1 = isMain ? 70 : 76
+  const r2 = 83
+  return {
+    id: i,
+    isMain,
+    x1: 100 + r1 * Math.sin(angle),
+    y1: 100 - r1 * Math.cos(angle),
+    x2: 100 + r2 * Math.sin(angle),
+    y2: 100 - r2 * Math.cos(angle),
+  }
+})
+
+// Lightweight Vector Analog Clock Component
+const AnalogClock = memo(function AnalogClock({ time }: { time: Date }) {
   const ms = time.getMilliseconds()
   const sec = time.getSeconds() + ms / 1000
   const min = time.getMinutes() + sec / 60
@@ -84,9 +107,6 @@ function AnalogClock({ time }: { time: Date }) {
     <div className="analog-clock-container">
       <svg className="analog-clock-svg" viewBox="0 0 200 200">
         <defs>
-          <filter id="clockShadow" x="-10%" y="-10%" width="120%" height="120%">
-            <feDropShadow dx="0" dy="3" stdDeviation="4" floodOpacity="0.18" />
-          </filter>
           <linearGradient id="clockFaceGrad" x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stopColor="rgba(255, 255, 255, 0.45)" />
             <stop offset="100%" stopColor="rgba(255, 255, 255, 0.15)" />
@@ -94,32 +114,22 @@ function AnalogClock({ time }: { time: Date }) {
         </defs>
 
         {/* Outer Face */}
-        <circle cx="100" cy="100" r="90" fill="url(#clockFaceGrad)" stroke="rgba(255, 255, 255, 0.7)" strokeWidth="2" filter="url(#clockShadow)" />
+        <circle cx="100" cy="100" r="90" fill="url(#clockFaceGrad)" stroke="rgba(255, 255, 255, 0.7)" strokeWidth="2" />
 
-        {/* Hour markers (12 ticks) */}
-        {Array.from({ length: 12 }).map((_, i) => {
-          const angle = (i * 30 * Math.PI) / 180
-          const isMain = i % 3 === 0
-          const r1 = isMain ? 70 : 76
-          const r2 = 83
-          const x1 = 100 + r1 * Math.sin(angle)
-          const y1 = 100 - r1 * Math.cos(angle)
-          const x2 = 100 + r2 * Math.sin(angle)
-          const y2 = 100 - r2 * Math.cos(angle)
-          return (
-            <line
-              key={i}
-              x1={x1}
-              y1={y1}
-              x2={x2}
-              y2={y2}
-              stroke="var(--text-main)"
-              strokeWidth={isMain ? 3 : 1.5}
-              strokeLinecap="round"
-              opacity={isMain ? 0.85 : 0.45}
-            />
-          )
-        })}
+        {/* Hour Ticks */}
+        {CLOCK_TICKS.map((t) => (
+          <line
+            key={t.id}
+            x1={t.x1}
+            y1={t.y1}
+            x2={t.x2}
+            y2={t.y2}
+            stroke="var(--text-main)"
+            strokeWidth={t.isMain ? 3 : 1.5}
+            strokeLinecap="round"
+            opacity={t.isMain ? 0.85 : 0.45}
+          />
+        ))}
 
         {/* Hour Hand */}
         <line
@@ -144,7 +154,7 @@ function AnalogClock({ time }: { time: Date }) {
           opacity="0.9"
         />
 
-        {/* Second Hand (Accent Color) */}
+        {/* Second Hand */}
         <line
           x1={100 - 14 * Math.sin((secAngle * Math.PI) / 180)}
           y1={100 + 14 * Math.cos((secAngle * Math.PI) / 180)}
@@ -160,12 +170,304 @@ function AnalogClock({ time }: { time: Date }) {
       </svg>
     </div>
   )
-}
+})
 
+// Isolated Clock Display Component to keep 1-second ticks scoped
+const HeroClockCard = memo(function HeroClockCard({
+  clockType,
+  is24Hour,
+  setIs24Hour,
+  weatherCity,
+  showSearch,
+  setShowSearch,
+  searchQuery,
+  setSearchQuery,
+  searchError,
+  handleCitySearch,
+}: {
+  clockType: ClockType
+  is24Hour: boolean
+  setIs24Hour: (val: boolean) => void
+  weatherCity: string
+  showSearch: boolean
+  setShowSearch: (val: boolean) => void
+  searchQuery: string
+  setSearchQuery: (val: string) => void
+  searchError: string
+  handleCitySearch: (e: React.FormEvent) => void
+}) {
+  const [time, setTime] = useState(() => new Date())
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setTime(new Date()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  const hours = is24Hour ? time.getHours().toString().padStart(2, '0') : (time.getHours() % 12 || 12).toString().padStart(2, '0')
+  const minutes = time.getMinutes().toString().padStart(2, '0')
+  const seconds = time.getSeconds().toString().padStart(2, '0')
+  const meridiem = time.getHours() >= 12 ? 'PM' : 'AM'
+
+  return (
+    <section className="glass-card hero-clock-card">
+      {clockType === 'analog' ? (
+        <div className="analog-hero-wrapper">
+          <AnalogClock time={time} />
+          <div className="analog-time-digital-sub">
+            <span>
+              {hours}:{minutes} <small>{seconds}</small> {!is24Hour && meridiem}
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div className="clock-time-wrapper">
+          <span className="pixel-big-digits">{hours}:{minutes}</span>
+          <div className="clock-sub-digits">
+            <span className="clock-sec-badge">{seconds}</span>
+            {!is24Hour && <span className="clock-ampm-badge">{meridiem}</span>}
+          </div>
+        </div>
+      )}
+
+      <div className="clock-footer-row">
+        <button className="location-tag-btn" onClick={() => setShowSearch(!showSearch)} title="Search city">
+          <MapPin size={13} /> <span>{weatherCity}</span> <Search size={10} className="search-icon-hint" />
+        </button>
+
+        {clockType === 'digital' && (
+          <button className="glass-pill-btn sm" onClick={() => setIs24Hour(!is24Hour)}>
+            {is24Hour ? '24-HOUR' : '12-HOUR'}
+          </button>
+        )}
+      </div>
+
+      {showSearch && (
+        <form className="city-search-box" onSubmit={handleCitySearch}>
+          <input
+            type="text"
+            className="city-input"
+            placeholder="Type city (e.g. Colombo, Paris)..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            autoFocus
+          />
+          <button type="submit" className="glass-pill-btn sm accent">
+            <Check size={12} />
+          </button>
+          <button type="button" className="glass-pill-btn sm" onClick={() => setShowSearch(false)}>
+            <X size={12} />
+          </button>
+        </form>
+      )}
+      {searchError && <div className="search-err-msg">{searchError}</div>}
+    </section>
+  )
+})
+
+// Isolated At-A-Glance Date Display Header
+const AtAGlanceHeader = memo(function AtAGlanceHeader({
+  temp,
+  code,
+  displayTemp,
+  tempUnit,
+  setTempUnit,
+  detectLocationAndWeather,
+  weatherLoading,
+  showSettings,
+  setShowSettings,
+  handlePointerDown,
+  handlePointerMove,
+  handlePointerEnd,
+}: {
+  temp: number
+  code: number
+  displayTemp: (c: number) => string
+  tempUnit: 'C' | 'F'
+  setTempUnit: (u: 'C' | 'F') => void
+  detectLocationAndWeather: () => void
+  weatherLoading: boolean
+  showSettings: boolean
+  setShowSettings: (val: boolean) => void
+  handlePointerDown: (e: React.PointerEvent<HTMLElement>) => void
+  handlePointerMove: (e: React.PointerEvent<HTMLElement>) => void
+  handlePointerEnd: (e: React.PointerEvent<HTMLElement>) => void
+}) {
+  const dateStr = useMemo(
+    () => new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }),
+    []
+  )
+  const weatherInfo = getWeatherInfo(code)
+  const WeatherIcon = weatherInfo.Icon
+
+  return (
+    <header
+      className="widget-header-bar drag-region"
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerEnd}
+      onPointerCancel={handlePointerEnd}
+    >
+      <div className="pixel-at-a-glance">
+        <span className="at-date">{dateStr}</span>
+        <span className="at-sep">•</span>
+        <span className="at-weather">
+          <WeatherIcon size={14} style={{ color: weatherInfo.color }} /> {displayTemp(temp)}
+        </span>
+      </div>
+
+      <div className="drag-handle-pill">
+        <GripHorizontal size={14} />
+      </div>
+
+      <div className="header-quick-toggles">
+        <button className="glass-pill-btn" onClick={() => setTempUnit(tempUnit === 'C' ? 'F' : 'C')} title="Toggle Temperature Unit">
+          °{tempUnit}
+        </button>
+        <button className="glass-pill-btn" onClick={detectLocationAndWeather} disabled={weatherLoading} title="Refresh Location & Weather">
+          <RefreshCw size={12} className={weatherLoading ? 'spin' : ''} />
+        </button>
+        <button
+          className={`glass-pill-btn ${showSettings ? 'active' : ''}`}
+          onClick={() => setShowSettings(!showSettings)}
+          title="Settings & Appearance"
+        >
+          <Settings size={12} />
+        </button>
+      </div>
+    </header>
+  )
+})
+
+// Isolated Weather Card
+const WeatherHeroCard = memo(function WeatherHeroCard({
+  weather,
+  displayTemp,
+}: {
+  weather: WeatherData
+  displayTemp: (c: number) => string
+}) {
+  const weatherInfo = getWeatherInfo(weather.code)
+  const WeatherIcon = weatherInfo.Icon
+
+  return (
+    <section className="glass-card weather-hero-card">
+      <div className="weather-header-row">
+        <div className="weather-condition-lockup">
+          <WeatherIcon size={32} style={{ color: weatherInfo.color }} />
+          <div>
+            <span className="weather-temp-hero">{displayTemp(weather.temp)}</span>
+            <span className="weather-desc">{weatherInfo.label}</span>
+          </div>
+        </div>
+
+        <div className="weather-hl">
+          <span>H {displayTemp(weather.high)}</span>
+          <span>L {displayTemp(weather.low)}</span>
+        </div>
+      </div>
+
+      <div className="weather-details-grid">
+        <div className="weather-detail-item">
+          <Droplets size={13} />
+          <span>Humidity</span>
+          <strong>{weather.humidity}%</strong>
+        </div>
+        <div className="weather-detail-item">
+          <Wind size={13} />
+          <span>Wind</span>
+          <strong>{weather.wind} km/h</strong>
+        </div>
+        <div className="weather-detail-item">
+          <Thermometer size={13} />
+          <span>Unit</span>
+          <strong>Celsius (°C)</strong>
+        </div>
+      </div>
+    </section>
+  )
+})
+
+// Isolated Media Player Card
+const MediaPlayerCard = memo(function MediaPlayerCard({
+  mediaInfo,
+  tracksList,
+  activeTrackIndex,
+  handleCycleTrack,
+  handleMediaControl,
+}: {
+  mediaInfo: MediaTrack
+  tracksList: MediaTrack[]
+  activeTrackIndex: number
+  handleCycleTrack: () => void
+  handleMediaControl: (action: 'playpause' | 'next' | 'prev') => void
+}) {
+  const [progress, setProgress] = useState(45)
+  const [isMuted, setIsMuted] = useState(false)
+
+  // Media Seekbar Simulation (scoped to media player only)
+  useEffect(() => {
+    let interval: number | undefined
+    if (mediaInfo.isPlaying) {
+      interval = window.setInterval(() => {
+        setProgress((prev) => (prev >= 100 ? 0 : prev + 1))
+      }, 1000)
+    }
+    return () => window.clearInterval(interval)
+  }, [mediaInfo.isPlaying])
+
+  return (
+    <section className="glass-card media-player-card">
+      <div className="media-top-info">
+        <div className={`media-art-container ${mediaInfo.isPlaying ? 'pulse-art' : ''}`}>
+          <Music size={18} className="media-art-icon" />
+        </div>
+
+        <div className="media-meta-text">
+          <span className="media-title">{mediaInfo.title}</span>
+          <div className="media-artist-row">
+            <span className="media-artist">{mediaInfo.artist}</span>
+            {tracksList.length > 1 && (
+              <span className="media-track-badge">
+                {activeTrackIndex + 1}/{tracksList.length}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {tracksList.length > 1 && (
+          <button className="media-cycle-arrow-btn" onClick={handleCycleTrack} title="Switch to next active media player">
+            <ChevronRight size={16} />
+          </button>
+        )}
+
+        <button className="media-icon-btn" onClick={() => setIsMuted(!isMuted)}>
+          {isMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}
+        </button>
+      </div>
+
+      <div className="media-progress-bar">
+        <div className="media-progress-fill" style={{ width: `${progress}%` }}></div>
+      </div>
+
+      <div className="media-controls-row">
+        <button className="media-ctrl-btn" onClick={() => handleMediaControl('prev')} title="Previous Track">
+          <SkipBack size={16} />
+        </button>
+
+        <button className="media-play-btn" onClick={() => handleMediaControl('playpause')} title="Play / Pause">
+          {mediaInfo.isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" className="play-icon-offset" />}
+        </button>
+
+        <button className="media-ctrl-btn" onClick={() => handleMediaControl('next')} title="Next Track">
+          <SkipForward size={16} />
+        </button>
+      </div>
+    </section>
+  )
+})
+
+// Main App Container
 function App() {
-  const [time, setTime] = useState(new Date())
-
-  // Load saved preferences or defaults
   const loadSavedPrefs = () => {
     try {
       const saved = localStorage.getItem('daylight_widget_prefs_v2')
@@ -187,7 +489,6 @@ function App() {
   const [customOpacity, setCustomOpacity] = useState<number>(savedPrefs?.customOpacity ?? 0.78)
   const [textColor, setTextColor] = useState<string>(savedPrefs?.textColor ?? '#1c1b1f')
 
-  // AutoStart Windows Startup State
   const [autoStart, setAutoStart] = useState(false)
 
   useEffect(() => {
@@ -210,7 +511,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchError, setSearchError] = useState('')
 
-  // Weather State (Default to Sri Lanka if IP fails)
+  // Weather State
   const [weather, setWeather] = useState<WeatherData>({
     temp: 28,
     high: 31,
@@ -223,14 +524,7 @@ function App() {
   })
   const [weatherLoading, setWeatherLoading] = useState(false)
 
-  interface MediaTrack {
-    title: string
-    artist: string
-    app: string
-    isPlaying: boolean
-  }
-
-  // Live Media State (Real Spotify / System Media)
+  // Live Media State
   const [tracksList, setTracksList] = useState<MediaTrack[]>([])
   const [activeTrackIndex, setActiveTrackIndex] = useState(0)
   const [mediaInfo, setMediaInfo] = useState<MediaTrack>({
@@ -239,16 +533,12 @@ function App() {
     isPlaying: false,
     app: '',
   })
-  const [progress, setProgress] = useState(45)
-  const [isMuted, setIsMuted] = useState(false)
 
   const dragRef = useRef<{ active: boolean; lastX: number; lastY: number } | null>(null)
-
-  // Save preferences to localStorage & sync across all open widgets
   const syncChannelRef = useRef<BroadcastChannel | null>(null)
   const isSyncingRef = useRef(false)
 
-  const applyPrefs = (data: any) => {
+  const applyPrefs = useCallback((data: any) => {
     if (!data) return
     isSyncingRef.current = true
     if (typeof data.is24Hour === 'boolean') setIs24Hour(data.is24Hour)
@@ -262,9 +552,8 @@ function App() {
     setTimeout(() => {
       isSyncingRef.current = false
     }, 50)
-  }
+  }, [])
 
-  // Initialize BroadcastChannel & IPC listeners for instant cross-widget sync
   useEffect(() => {
     try {
       syncChannelRef.current = new BroadcastChannel('daylight_widget_prefs_sync')
@@ -277,8 +566,9 @@ function App() {
       /* ignore */
     }
 
+    let unsubSettingsSync: (() => void) | undefined
     if (window.widgetAPI?.onSettingsSync) {
-      window.widgetAPI.onSettingsSync((data) => {
+      unsubSettingsSync = window.widgetAPI.onSettingsSync((data) => {
         applyPrefs(data)
       })
     }
@@ -297,8 +587,9 @@ function App() {
     return () => {
       window.removeEventListener('storage', handleStorageChange)
       if (syncChannelRef.current) syncChannelRef.current.close()
+      if (unsubSettingsSync) unsubSettingsSync()
     }
-  }, [])
+  }, [applyPrefs])
 
   useEffect(() => {
     const prefs = {
@@ -323,16 +614,11 @@ function App() {
     }
   }, [is24Hour, tempUnit, clockType, clockTheme, customColor1, customColor2, customOpacity, textColor])
 
-  // Live Clock Interval
+  // Single mount IPC Media Listener with clean cleanup
   useEffect(() => {
-    const timer = window.setInterval(() => setTime(new Date()), 1000)
-    return () => window.clearInterval(timer)
-  }, [])
-
-  // Listen to REAL Spotify / Windows System Media Updates via IPC
-  useEffect(() => {
+    let unsubMedia: (() => void) | undefined
     if (window.widgetAPI?.onLiveMediaUpdate) {
-      window.widgetAPI.onLiveMediaUpdate((raw: any) => {
+      unsubMedia = window.widgetAPI.onLiveMediaUpdate((raw: any) => {
         let items: any[] = []
         if (Array.isArray(raw)) {
           items = raw
@@ -350,47 +636,45 @@ function App() {
           }))
 
         setTracksList(validTracks)
-
-        if (validTracks.length > 0) {
-          const idx = activeTrackIndex % validTracks.length
-          setMediaInfo(validTracks[idx])
-        } else {
-          setMediaInfo({
-            title: 'No media playing',
-            artist: 'Spotify / Media Player',
-            isPlaying: false,
-            app: '',
-          })
-        }
       })
     }
-  }, [activeTrackIndex])
+    return () => {
+      if (unsubMedia) unsubMedia()
+    }
+  }, [])
 
-  const handleCycleTrack = () => {
+  // Sync active track index to display item
+  useEffect(() => {
+    if (tracksList.length > 0) {
+      const idx = activeTrackIndex % tracksList.length
+      setMediaInfo(tracksList[idx])
+    } else {
+      setMediaInfo({
+        title: 'No media playing',
+        artist: 'Spotify / Media Player',
+        isPlaying: false,
+        app: '',
+      })
+    }
+  }, [tracksList, activeTrackIndex])
+
+  const handleCycleTrack = useCallback(() => {
     if (tracksList.length > 1) {
       const nextIdx = (activeTrackIndex + 1) % tracksList.length
       setActiveTrackIndex(nextIdx)
       setMediaInfo(tracksList[nextIdx])
     }
-  }
+  }, [tracksList, activeTrackIndex])
 
-  // Media Progress Simulation
-  useEffect(() => {
-    let interval: number | undefined
-    if (mediaInfo.isPlaying) {
-      interval = window.setInterval(() => {
-        setProgress((prev) => (prev >= 100 ? 0 : prev + 1))
-      }, 1000)
-    }
-    return () => window.clearInterval(interval)
-  }, [mediaInfo.isPlaying])
-
-  // Fetch Weather by Lat / Lon
-  const fetchWeatherForCoords = async (lat: number, lon: number, cityName: string) => {
+  // Fetch Weather by Lat / Lon with AbortController timeout
+  const fetchWeatherForCoords = useCallback(async (lat: number, lon: number, cityName: string) => {
     setWeatherLoading(true)
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 6000)
     try {
       const res = await fetch(
-        `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,is_day,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min&timezone=auto`
+        `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,is_day,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min&timezone=auto`,
+        { signal: controller.signal }
       )
       if (res.ok) {
         const data = await res.json()
@@ -411,15 +695,20 @@ function App() {
     } catch (err) {
       console.error('Weather fetch error:', err)
     } finally {
+      clearTimeout(timeoutId)
       setWeatherLoading(false)
     }
-  }
+  }, [])
 
-  // Automatic Location Detection (Sri Lanka Default)
-  const detectLocationAndWeather = async () => {
+  // Automatic Location Detection
+  const detectLocationAndWeather = useCallback(async () => {
     setWeatherLoading(true)
     try {
-      const ipRes = await fetch('https://ipwho.is/')
+      const controller1 = new AbortController()
+      const timer1 = setTimeout(() => controller1.abort(), 4000)
+      const ipRes = await fetch('https://ipwho.is/', { signal: controller1.signal })
+      clearTimeout(timer1)
+
       if (ipRes.ok) {
         const ipData = await ipRes.json()
         if (ipData.success && ipData.latitude && ipData.longitude) {
@@ -429,7 +718,11 @@ function App() {
         }
       }
 
-      const geoRes = await fetch('https://get.geojs.io/v1/ip/geo.json')
+      const controller2 = new AbortController()
+      const timer2 = setTimeout(() => controller2.abort(), 4000)
+      const geoRes = await fetch('https://get.geojs.io/v1/ip/geo.json', { signal: controller2.signal })
+      clearTimeout(timer2)
+
       if (geoRes.ok) {
         const geoData = await geoRes.json()
         if (geoData.latitude && geoData.longitude) {
@@ -443,13 +736,13 @@ function App() {
     } catch {
       await fetchWeatherForCoords(6.9271, 79.8612, 'Colombo, Sri Lanka')
     }
-  }
+  }, [fetchWeatherForCoords])
 
   useEffect(() => {
     detectLocationAndWeather()
     const interval = window.setInterval(detectLocationAndWeather, 10 * 60 * 1000)
     return () => window.clearInterval(interval)
-  }, [])
+  }, [detectLocationAndWeather])
 
   // City Search Handler
   const handleCitySearch = async (e: React.FormEvent) => {
@@ -457,9 +750,12 @@ function App() {
     if (!searchQuery.trim()) return
     setWeatherLoading(true)
     setSearchError('')
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 5000)
     try {
       const geoRes = await fetch(
-        `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(searchQuery.trim())}&count=1&language=en&format=json`
+        `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(searchQuery.trim())}&count=1&language=en&format=json`,
+        { signal: controller.signal }
       )
       if (geoRes.ok) {
         const geoData = await geoRes.json()
@@ -475,17 +771,18 @@ function App() {
     } catch {
       setSearchError('Failed to search city.')
     } finally {
+      clearTimeout(timer)
       setWeatherLoading(false)
     }
   }
 
   // System Media Controls IPC
-  const handleMediaControl = (action: 'playpause' | 'next' | 'prev') => {
+  const handleMediaControl = useCallback((action: 'playpause' | 'next' | 'prev') => {
     setMediaInfo((prev) => ({ ...prev, isPlaying: action === 'playpause' ? !prev.isPlaying : prev.isPlaying }))
     window.widgetAPI?.sendMediaControl(action)
-  }
+  }, [])
 
-  const handlePointerDown = (e: React.PointerEvent<HTMLElement>) => {
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLElement>) => {
     if ((e.target as HTMLElement).closest('button, input')) return
     dragRef.current = { active: true, lastX: e.screenX, lastY: e.screenY }
     try {
@@ -493,9 +790,9 @@ function App() {
     } catch {
       /* ignore */
     }
-  }
+  }, [])
 
-  const handlePointerMove = (e: React.PointerEvent<HTMLElement>) => {
+  const handlePointerMove = useCallback((e: React.PointerEvent<HTMLElement>) => {
     const drag = dragRef.current
     if (!drag || !drag.active) return
     const dx = e.screenX - drag.lastX
@@ -504,29 +801,24 @@ function App() {
     drag.lastX = e.screenX
     drag.lastY = e.screenY
     window.widgetAPI?.moveWindowBy(dx, dy)
-  }
+  }, [])
 
-  const handlePointerEnd = (e: React.PointerEvent<HTMLElement>) => {
+  const handlePointerEnd = useCallback((e: React.PointerEvent<HTMLElement>) => {
     dragRef.current = null
     try {
       if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
     } catch {
       /* ignore */
     }
-  }
+  }, [])
 
-  const displayTemp = (c: number) => (tempUnit === 'C' ? `${c}°C` : `${Math.round((c * 9) / 5 + 32)}°F`)
-  const hours = is24Hour ? time.getHours().toString().padStart(2, '0') : (time.getHours() % 12 || 12).toString().padStart(2, '0')
-  const minutes = time.getMinutes().toString().padStart(2, '0')
-  const seconds = time.getSeconds().toString().padStart(2, '0')
-  const meridiem = time.getHours() >= 12 ? 'PM' : 'AM'
-  const dateStr = time.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
+  const displayTemp = useCallback(
+    (c: number) => (tempUnit === 'C' ? `${c}°C` : `${Math.round((c * 9) / 5 + 32)}°F`),
+    [tempUnit]
+  )
 
-  const weatherInfo = getWeatherInfo(weather.code)
-  const WeatherIcon = weatherInfo.Icon
-
-  // Dynamic Glass Theme Styling Calculation
-  const getWidgetThemeStyles = (): React.CSSProperties => {
+  // Memoized Theme Styles calculation
+  const widgetThemeStyles = useMemo<React.CSSProperties>(() => {
     if (clockTheme === 'dark_obsidian') {
       return {
         '--glass-bg': 'linear-gradient(135deg, rgba(26, 28, 44, 0.88), rgba(14, 16, 28, 0.82))',
@@ -584,7 +876,6 @@ function App() {
       } as React.CSSProperties
     }
 
-    // Default Light Frosted Glass
     return {
       '--glass-bg': 'linear-gradient(135deg, rgba(255, 255, 255, 0.78), rgba(236, 242, 255, 0.68))',
       '--card-bg': 'rgba(255, 255, 255, 0.55)',
@@ -594,7 +885,7 @@ function App() {
       '--text-muted': '#49454f',
       '--accent-cyan': '#2b6cb0',
     } as React.CSSProperties
-  }
+  }, [clockTheme, customColor1, customColor2, customOpacity, textColor])
 
   const resetSettings = () => {
     setIs24Hour(false)
@@ -610,43 +901,22 @@ function App() {
 
   return (
     <main className="pixel-glass-stage">
-      <div className="pixel-glass-widget" style={getWidgetThemeStyles()}>
-        {/* Header Ribbon / At-a-Glance Pill */}
-        <header
-          className="widget-header-bar drag-region"
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerEnd}
-          onPointerCancel={handlePointerEnd}
-        >
-          <div className="pixel-at-a-glance">
-            <span className="at-date">{dateStr}</span>
-            <span className="at-sep">•</span>
-            <span className="at-weather">
-              <WeatherIcon size={14} style={{ color: weatherInfo.color }} /> {displayTemp(weather.temp)}
-            </span>
-          </div>
-
-          <div className="drag-handle-pill">
-            <GripHorizontal size={14} />
-          </div>
-
-          <div className="header-quick-toggles">
-            <button className="glass-pill-btn" onClick={() => setTempUnit(tempUnit === 'C' ? 'F' : 'C')} title="Toggle Temperature Unit">
-              °{tempUnit}
-            </button>
-            <button className="glass-pill-btn" onClick={detectLocationAndWeather} disabled={weatherLoading} title="Refresh Location & Weather">
-              <RefreshCw size={12} className={weatherLoading ? 'spin' : ''} />
-            </button>
-            <button
-              className={`glass-pill-btn ${showSettings ? 'active' : ''}`}
-              onClick={() => setShowSettings(!showSettings)}
-              title="Settings & Appearance"
-            >
-              <Settings size={12} />
-            </button>
-          </div>
-        </header>
+      <div className="pixel-glass-widget" style={widgetThemeStyles}>
+        {/* At-a-Glance Header Ribbon */}
+        <AtAGlanceHeader
+          temp={weather.temp}
+          code={weather.code}
+          displayTemp={displayTemp}
+          tempUnit={tempUnit}
+          setTempUnit={setTempUnit}
+          detectLocationAndWeather={detectLocationAndWeather}
+          weatherLoading={weatherLoading}
+          showSettings={showSettings}
+          setShowSettings={setShowSettings}
+          handlePointerDown={handlePointerDown}
+          handlePointerMove={handlePointerMove}
+          handlePointerEnd={handlePointerEnd}
+        />
 
         {/* Settings & Customization Drawer Modal */}
         {showSettings && (
@@ -660,7 +930,7 @@ function App() {
               </button>
             </div>
 
-            {/* Clock Type Toggle */}
+            {/* Clock Style Control */}
             <div className="settings-group">
               <label className="settings-label">
                 <Clock size={13} /> Clock Style
@@ -726,7 +996,7 @@ function App() {
               </div>
             </div>
 
-            {/* Custom Color & Gradient Controls */}
+            {/* Custom Color Controls */}
             {clockTheme === 'custom' && (
               <div className="settings-group custom-color-controls">
                 <div className="color-picker-row">
@@ -776,7 +1046,6 @@ function App() {
               </button>
             </div>
 
-            {/* Extra Controls */}
             <div className="drawer-footer-actions">
               <button className="glass-pill-btn sm danger" onClick={resetSettings}>
                 <RotateCcw size={11} /> Reset Defaults
@@ -785,147 +1054,31 @@ function App() {
           </section>
         )}
 
-        {/* Hero Clock Card (Digital OR Modern Analog) */}
-        <section className="glass-card hero-clock-card">
-          {clockType === 'analog' ? (
-            <div className="analog-hero-wrapper">
-              <AnalogClock time={time} />
-              <div className="analog-time-digital-sub">
-                <span>
-                  {hours}:{minutes} <small>{seconds}</small> {!is24Hour && meridiem}
-                </span>
-              </div>
-            </div>
-          ) : (
-            <div className="clock-time-wrapper">
-              <span className="pixel-big-digits">{hours}:{minutes}</span>
-              <div className="clock-sub-digits">
-                <span className="clock-sec-badge">{seconds}</span>
-                {!is24Hour && <span className="clock-ampm-badge">{meridiem}</span>}
-              </div>
-            </div>
-          )}
-
-          <div className="clock-footer-row">
-            <button className="location-tag-btn" onClick={() => setShowSearch(!showSearch)} title="Search city">
-              <MapPin size={13} /> <span>{weather.city}</span> <Search size={10} className="search-icon-hint" />
-            </button>
-
-            {clockType === 'digital' && (
-              <button className="glass-pill-btn sm" onClick={() => setIs24Hour(!is24Hour)}>
-                {is24Hour ? '24-HOUR' : '12-HOUR'}
-              </button>
-            )}
-          </div>
-
-          {/* Interactive City Search Dropdown */}
-          {showSearch && (
-            <form className="city-search-box" onSubmit={handleCitySearch}>
-              <input
-                type="text"
-                className="city-input"
-                placeholder="Type city (e.g. Colombo, Paris)..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                autoFocus
-              />
-              <button type="submit" className="glass-pill-btn sm accent">
-                <Check size={12} />
-              </button>
-              <button type="button" className="glass-pill-btn sm" onClick={() => setShowSearch(false)}>
-                <X size={12} />
-              </button>
-            </form>
-          )}
-          {searchError && <div className="search-err-msg">{searchError}</div>}
-        </section>
+        {/* Hero Clock Card */}
+        <HeroClockCard
+          clockType={clockType}
+          is24Hour={is24Hour}
+          setIs24Hour={setIs24Hour}
+          weatherCity={weather.city}
+          showSearch={showSearch}
+          setShowSearch={setShowSearch}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          searchError={searchError}
+          handleCitySearch={handleCitySearch}
+        />
 
         {/* Live Weather Card */}
-        <section className="glass-card weather-hero-card">
-          <div className="weather-header-row">
-            <div className="weather-condition-lockup">
-              <WeatherIcon size={32} style={{ color: weatherInfo.color }} />
-              <div>
-                <span className="weather-temp-hero">{displayTemp(weather.temp)}</span>
-                <span className="weather-desc">{weatherInfo.label}</span>
-              </div>
-            </div>
-
-            <div className="weather-hl">
-              <span>H {displayTemp(weather.high)}</span>
-              <span>L {displayTemp(weather.low)}</span>
-            </div>
-          </div>
-
-          <div className="weather-details-grid">
-            <div className="weather-detail-item">
-              <Droplets size={13} />
-              <span>Humidity</span>
-              <strong>{weather.humidity}%</strong>
-            </div>
-            <div className="weather-detail-item">
-              <Wind size={13} />
-              <span>Wind</span>
-              <strong>{weather.wind} km/h</strong>
-            </div>
-            <div className="weather-detail-item">
-              <Thermometer size={13} />
-              <span>Unit</span>
-              <strong>Celsius (°C)</strong>
-            </div>
-          </div>
-        </section>
+        <WeatherHeroCard weather={weather} displayTemp={displayTemp} />
 
         {/* Real-time Spotify / System Media Player */}
-        <section className="glass-card media-player-card">
-          <div className="media-top-info">
-            <div className={`media-art-container ${mediaInfo.isPlaying ? 'pulse-art' : ''}`}>
-              <Music size={18} className="media-art-icon" />
-            </div>
-
-            <div className="media-meta-text">
-              <span className="media-title">{mediaInfo.title}</span>
-              <div className="media-artist-row">
-                <span className="media-artist">{mediaInfo.artist}</span>
-                {tracksList.length > 1 && (
-                  <span className="media-track-badge">
-                    {activeTrackIndex + 1}/{tracksList.length}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {tracksList.length > 1 && (
-              <button className="media-cycle-arrow-btn" onClick={handleCycleTrack} title="Switch to next active media player">
-                <ChevronRight size={16} />
-              </button>
-            )}
-
-            <button className="media-icon-btn" onClick={() => setIsMuted(!isMuted)}>
-              {isMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}
-            </button>
-          </div>
-
-          {/* Progress Seekbar */}
-          <div className="media-progress-bar">
-            <div className="media-progress-fill" style={{ width: `${progress}%` }}></div>
-          </div>
-
-          {/* Controls connected to Spotify & System Media */}
-          <div className="media-controls-row">
-            <button className="media-ctrl-btn" onClick={() => handleMediaControl('prev')} title="Previous Track">
-              <SkipBack size={16} />
-            </button>
-
-            <button className="media-play-btn" onClick={() => handleMediaControl('playpause')} title="Play / Pause">
-              {mediaInfo.isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" className="play-icon-offset" />}
-            </button>
-
-            <button className="media-ctrl-btn" onClick={() => handleMediaControl('next')} title="Next Track">
-              <SkipForward size={16} />
-            </button>
-          </div>
-        </section>
+        <MediaPlayerCard
+          mediaInfo={mediaInfo}
+          tracksList={tracksList}
+          activeTrackIndex={activeTrackIndex}
+          handleCycleTrack={handleCycleTrack}
+          handleMediaControl={handleMediaControl}
+        />
 
         {/* Footer */}
         <footer className="pixel-glass-footer">
@@ -938,8 +1091,3 @@ function App() {
 }
 
 export default App
-
-
-
-
-

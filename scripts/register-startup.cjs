@@ -21,7 +21,7 @@ function findExe() {
 const targetPath = findExe();
 if (!targetPath) {
   console.error('No portable EXE found in the release folder.');
-  console.error('Build one first with:  npm run package:win');
+  console.error('Build one first with: npm run package:win');
   process.exit(1);
 }
 
@@ -42,13 +42,24 @@ shortcut.Save
 `;
 
 fs.mkdirSync(shortcutDir, { recursive: true });
-fs.writeFileSync(path.join(__dirname, 'startup.vbs'), script, 'utf8');
+const vbsPath = path.join(__dirname, 'startup.vbs');
+fs.writeFileSync(vbsPath, script, 'utf8');
 
 try {
-  execSync(`cscript //NoLogo "${path.join(__dirname, 'startup.vbs')}"`, { stdio: 'inherit' });
+  execSync(`cscript //NoLogo "${vbsPath}"`, { stdio: 'inherit' });
   console.log(`Startup shortcut installed: ${shortcutPath}`);
-  console.log(`Target: ${targetPath}`);
 } catch (error) {
   console.error('Failed to create startup shortcut:', error.message);
-  process.exit(1);
+} finally {
+  try { fs.unlinkSync(vbsPath); } catch {}
+}
+
+// Register Windows Task Scheduler Task (runs automatically on user logon)
+try {
+  const schCommand = `schtasks /Create /TN "${appName}" /TR "\\"${targetPath}\\"" /SC ONLOGON /F`;
+  execSync(schCommand, { stdio: 'inherit' });
+  console.log(`Windows Task Scheduler task created: ${appName}`);
+  console.log(`Target Executable: ${targetPath}`);
+} catch (error) {
+  console.error('Task Scheduler registration note:', error.message);
 }

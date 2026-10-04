@@ -3,6 +3,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 
+// Ultra-low resource Chromium & V8 memory flags
+app.commandLine.appendSwitch('enable-low-end-device-mode');
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=64 --optimize-for-size');
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+app.commandLine.appendSwitch('disable-breakpad');
+app.commandLine.appendSwitch('disable-component-update');
+app.commandLine.appendSwitch('disable-background-networking');
+app.commandLine.appendSwitch('disable-speech-api');
+app.commandLine.appendSwitch('renderer-process-limit', '1');
+
 process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err);
 });
@@ -20,6 +30,11 @@ const WIDGET_H = 740;
 
 let mainWindows = [];
 let saveTimer = null;
+let isPollingMedia = false;
+
+const mediaScriptPath = fs.existsSync(path.join(appDir, 'scripts', 'get-media.ps1'))
+  ? path.join(appDir, 'scripts', 'get-media.ps1')
+  : path.join(appDir, 'get-media.ps1');
 
 app.setName('DaylightWidget');
 
@@ -59,7 +74,8 @@ function saveStateNow() {
   for (const win of mainWindows) {
     if (win.isDestroyed() || !win._displayId) continue;
     const [x, y] = win.getPosition();
-    states[win._displayId] = { x, y };
+    const [width, height] = win.getSize();
+    states[win._displayId] = { x, y, width, height };
     updated = true;
   }
   if (!updated) return;
@@ -75,7 +91,7 @@ function scheduleSave() {
   saveTimer = setTimeout(saveStateNow, 300);
 }
 
-function clampToScreens(x, y) {
+function clampToScreens(x, y, w = WIDGET_W, h = WIDGET_H) {
   const displays = screen.getAllDisplays();
   if (!displays.length) return { x, y };
   const area = displays.reduce(
@@ -89,194 +105,158 @@ function clampToScreens(x, y) {
     },
     { minX: 0, minY: 0, maxX: 1920, maxY: 1080 },
   );
-  const nx = Math.min(Math.max(x, area.minX), area.maxX - WIDGET_W);
-  const ny = Math.min(Math.max(y, area.minY), area.maxY - WIDGET_H);
+  const nx = Math.min(Math.max(x, area.minX), area.maxX - w);
+  const ny = Math.min(Math.max(y, area.minY), area.maxY - h);
   return { x: Math.round(nx), y: Math.round(ny) };
 }
 
-// Live Windows Media Transport Controls (GSMTC Multi-Session & Window Title Engine)
-const GSMTC_SCRIPT = String.raw`
-[cmdletbinding()]
-param()
-
-$list = @()
-
-try {
-    [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime] | Out-Null
-    $asyncOp = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()
-    $i = 0
-    while ($asyncOp.Status -eq 'Started' -and $i -lt 15) { Start-Sleep -Milliseconds 40; $i++ }
-    if ($asyncOp.Status -eq 'Completed') {
-        $mgr = $asyncOp.GetResults()
-        if ($mgr) {
-            $sessions = $mgr.GetSessions()
-            foreach ($s in $sessions) {
-                $op = $s.TryGetMediaPropertiesAsync()
-                $j = 0
-                while ($op.Status -eq 'Started' -and $j -lt 15) { Start-Sleep -Milliseconds 40; $j++ }
-                if ($op.Status -eq 'Completed') {
-                    $p = $op.GetResults()
-                    $pb = $s.GetPlaybackInfo()
-                    if ($p -and ($p.Title -or $p.Artist)) {
-                        $list += [PSCustomObject]@{
-                            title = [string]$p.Title
-                            artist = if ([string]$p.Artist) { [string]$p.Artist } else { [string]$p.AlbumArtist }
-                            app = [string]$s.SourceAppUserModelId
-                            status = if ($pb) { [string]$pb.PlaybackStatus.ToString() } else { "Playing" }
-                        }
-                    }
-                }
-            }
-        }
-    }
-} catch {}
-
-$spotify = Get-Process Spotify -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -ne "" -and $_.MainWindowTitle -ne "Spotify" -and $_.MainWindowTitle -ne "Spotify Premium" -and $_.MainWindowTitle -ne "Spotify Free" } | Select-Object -First 1
-if ($spotify) {
-    $parts = $spotify.MainWindowTitle -split " - ", 2
-    $spTitle = if ($parts.Count -ge 2) { $parts[1].Trim() } else { $spotify.MainWindowTitle.Trim() }
-    $spArtist = if ($parts.Count -ge 2) { $parts[0].Trim() } else { "Spotify" }
-    
-    $exists = $list | Where-Object { $_.title -eq $spTitle }
-    if (-not $exists) {
-        $list += [PSCustomObject]@{
-            title = $spTitle
-            artist = $spArtist
-            app = "Spotify"
-            status = "Playing"
-        }
-    }
-}
-
-$browsers = Get-Process chrome, msedge, vlc, Music.UI, AppleMusic, foobar2000 -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -like "* - *" }
-foreach ($b in $browsers) {
-    $cleanTitle = $b.MainWindowTitle -replace " - Google Chrome$", "" -replace " - Microsoft Edge$", "" -replace " - YouTube$", "" -replace " - VLC media player$", ""
-    $parts = $cleanTitle -split " - ", 2
-    $bTitle = if ($parts.Count -ge 2) { $parts[0].Trim() } else { $cleanTitle.Trim() }
-    $bArtist = if ($parts.Count -ge 2) { $parts[1].Trim() } else { $b.ProcessName }
-    $exists = $list | Where-Object { $_.title -eq $bTitle }
-    if (-not $exists) {
-        $list += [PSCustomObject]@{
-            title = $bTitle
-            artist = $bArtist
-            app = $b.ProcessName
-            status = "Playing"
-        }
-    }
-}
-
-if ($list.Count -eq 0) {
-    Write-Output "[]"
-} else {
-    $json = $list | ConvertTo-Json -Compress
-    if ($json.StartsWith("{")) {
-        Write-Output "[$json]"
-    } else {
-        Write-Output $json
-    }
-}
-`;
-
 function pollLiveMedia() {
-  if (!isWin || mainWindows.length === 0) return;
-  const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', GSMTC_SCRIPT], { windowsHide: true });
+  if (!isWin || mainWindows.length === 0 || isPollingMedia) return;
+
+  const activeWindows = mainWindows.filter(w => !w.isDestroyed() && w.isVisible() && !w.isMinimized());
+  if (activeWindows.length === 0) return;
+
+  isPollingMedia = true;
+
+  const ps = spawn('powershell.exe', [
+    '-NoLogo',
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    mediaScriptPath,
+  ], { windowsHide: true });
+
   let out = '';
+  let killed = false;
+
+  const timer = setTimeout(() => {
+    killed = true;
+    try { ps.kill(); } catch {}
+    isPollingMedia = false;
+  }, 4000);
+
   ps.stdout.on('data', (d) => (out += d.toString()));
+
   ps.on('close', () => {
+    clearTimeout(timer);
+    isPollingMedia = false;
+    if (killed) return;
     try {
-      const data = JSON.parse(out.trim());
-      if (data) {
-        mainWindows.forEach((win) => {
-          if (!win.isDestroyed()) {
-            win.webContents.send('media:live-update', data);
-          }
-        });
+      const trimmed = out.trim();
+      if (trimmed) {
+        const data = JSON.parse(trimmed);
+        if (data) {
+          mainWindows.forEach((win) => {
+            if (!win.isDestroyed()) {
+              win.webContents.send('media:live-update', data);
+            }
+          });
+        }
       }
     } catch {
       /* ignore */
     }
   });
+
+  ps.on('error', () => {
+    clearTimeout(timer);
+    isPollingMedia = false;
+  });
 }
 
 function createWindow() {
+  if (mainWindows.length > 0) return; // Ensure single window instance
+
   const saved = loadState();
-  const displays = screen.getAllDisplays();
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const savedDisplayId = Object.keys(saved)[0];
+  const targetDisplay = (savedDisplayId && screen.getAllDisplays().find(d => String(d.id) === String(savedDisplayId))) || primaryDisplay;
 
   if (!hasBuiltApp) {
     startViteServer();
   }
 
-  displays.forEach((display) => {
-    const displaySaved = saved[display.id];
-    
-    const defaultX = display.workArea.x + Math.floor((display.workArea.width - WIDGET_W) / 2);
-    const defaultY = display.workArea.y + Math.floor((display.workArea.height - WIDGET_H) / 2);
+  const displaySaved = saved[targetDisplay.id];
+  const defaultWidth = displaySaved && typeof displaySaved.width === 'number' ? displaySaved.width : WIDGET_W;
+  const defaultHeight = displaySaved && typeof displaySaved.height === 'number' ? displaySaved.height : WIDGET_H;
 
-    const initialX = displaySaved && typeof displaySaved.x === 'number' ? displaySaved.x : defaultX;
-    const initialY = displaySaved && typeof displaySaved.y === 'number' ? displaySaved.y : defaultY;
+  const defaultX = targetDisplay.workArea.x + Math.floor((targetDisplay.workArea.width - defaultWidth) / 2);
+  const defaultY = targetDisplay.workArea.y + Math.floor((targetDisplay.workArea.height - defaultHeight) / 2);
 
-    const pos = clampToScreens(initialX, initialY);
+  const initialX = displaySaved && typeof displaySaved.x === 'number' ? displaySaved.x : defaultX;
+  const initialY = displaySaved && typeof displaySaved.y === 'number' ? displaySaved.y : defaultY;
 
-    const win = new BrowserWindow({
-      width: WIDGET_W,
-      height: WIDGET_H,
-      x: pos.x,
-      y: pos.y,
-      minWidth: 360,
-      minHeight: 480,
-      frame: false,
-      transparent: true,
-      resizable: true,
-      alwaysOnTop: false,
-      skipTaskbar: true,
-      focusable: true,
-      hasShadow: false,
-      show: true,
-      backgroundColor: '#00000000',
-      webPreferences: {
-        preload: path.join(appDir, 'preload.cjs'),
-        contextIsolation: true,
-        nodeIntegration: false,
+  const pos = clampToScreens(initialX, initialY, defaultWidth, defaultHeight);
+
+  const win = new BrowserWindow({
+    width: defaultWidth,
+    height: defaultHeight,
+    x: pos.x,
+    y: pos.y,
+    minWidth: 360,
+    minHeight: 480,
+    frame: false,
+    transparent: true,
+    resizable: true,
+    alwaysOnTop: false,
+    skipTaskbar: true,
+    focusable: true,
+    hasShadow: false,
+    show: true,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: path.join(appDir, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: true,
+      spellcheck: false,
+    },
+  });
+
+  win._displayId = targetDisplay.id;
+  mainWindows.push(win);
+
+  win.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+    console.error('Failed to load page:', errorCode, errorDescription);
+  });
+
+  win.on('move', scheduleSave);
+  win.on('resize', scheduleSave);
+  win.on('close', () => {
+    saveStateNow();
+    mainWindows = mainWindows.filter(w => w !== win);
+  });
+
+  if (hasBuiltApp) {
+    win.loadFile(distPath);
+  } else {
+    win.loadURL('http://localhost:5173');
+  }
+
+  win.webContents.on('context-menu', () => {
+    if (win.isDestroyed()) return;
+    const menu = Menu.buildFromTemplate([
+      {
+        label: 'Reset to center of screen',
+        click: () => {
+          const d = screen.getDisplayNearestPoint({ x: win.getPosition()[0], y: win.getPosition()[1] });
+          win.setPosition(d.workArea.x + Math.floor((d.workArea.width - WIDGET_W) / 2), d.workArea.y + Math.floor((d.workArea.height - WIDGET_H) / 2));
+          win.setSize(WIDGET_W, WIDGET_H);
+          scheduleSave();
+        },
       },
-    });
-    
-    win._displayId = display.id;
-    mainWindows.push(win);
+      { type: 'separator' },
+      { label: 'Quit DaylightWidget', click: () => app.quit() },
+    ]);
+    menu.popup({ window: win });
+  });
 
-    win.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
-      console.error('Failed to load page:', errorCode, errorDescription);
-    });
-
-    win.on('move', scheduleSave);
-    win.on('close', () => {
-      saveStateNow();
-      mainWindows = mainWindows.filter(w => w !== win);
-    });
-
-    if (hasBuiltApp) {
-      win.loadFile(distPath);
-    } else {
-      win.loadURL('http://localhost:5173');
-    }
-
-    win.webContents.on('context-menu', () => {
-      if (win.isDestroyed()) return;
-      const menu = Menu.buildFromTemplate([
-        { label: 'Reset to center of screen', click: () => {
-            const d = screen.getDisplayNearestPoint({ x: win.getPosition()[0], y: win.getPosition()[1] });
-            win.setPosition(d.workArea.x + Math.floor((d.workArea.width - WIDGET_W) / 2), d.workArea.y + Math.floor((d.workArea.height - WIDGET_H) / 2));
-        }},
-        { type: 'separator' },
-        { label: 'Quit DaylightWidget', click: () => app.quit() },
-      ]);
-      menu.popup({ window: win });
-    });
-
-    win.once('ready-to-show', () => {
-      if (win.isDestroyed()) return;
-      win.show();
-      win.focus();
-    });
+  win.once('ready-to-show', () => {
+    if (win.isDestroyed()) return;
+    win.show();
+    win.focus();
   });
 }
 
@@ -295,7 +275,8 @@ ipcMain.on('widget:move', (event, payload) => {
   const dx = Number(payload && payload.dx) || 0;
   const dy = Number(payload && payload.dy) || 0;
   const [x, y] = win.getPosition();
-  const p = clampToScreens(x + dx, y + dy);
+  const [w, h] = win.getSize();
+  const p = clampToScreens(x + dx, y + dy, w, h);
   win.setPosition(p.x, p.y);
   scheduleSave();
 });
@@ -350,7 +331,9 @@ if (!gotLock) {
     setInterval(pollLiveMedia, 3000);
 
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+      }
     });
   });
 
