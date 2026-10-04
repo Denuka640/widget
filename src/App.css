@@ -614,14 +614,52 @@
   text-overflow: ellipsis;
 }
 
+.media-artist-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  min-width: 0;
+}
+
 .media-artist {
   font-size: 10px;
   color: var(--text-muted);
   font-weight: 500;
-  margin-top: 2px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.media-track-badge {
+  font-family: var(--font-display);
+  font-size: 8px;
+  font-weight: 700;
+  background: var(--accent-cyan);
+  color: #ffffff;
+  padding: 1px 5px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.media-cycle-arrow-btn {
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  color: var(--text-main);
+  border-radius: 50%;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+}
+
+.media-cycle-arrow-btn:hover {
+  background: rgba(255, 255, 255, 0.9);
+  transform: scale(1.12);
 }
 
 .media-icon-btn {
@@ -937,6 +975,21 @@
 .glass-pill-btn.active {
   background: var(--card-hover-bg);
   border-color: var(--accent-cyan);
+}
+
+.glass-pill-btn.full-width {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 14px;
+  font-size: 11px;
+  justify-content: center;
+}
+
+.glass-pill-btn.active-accent {
+  background: var(--accent-cyan);
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 /* ==========================================================================

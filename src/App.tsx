@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   Check,
+  ChevronRight,
   Clock,
   CloudDrizzle,
   CloudFog,
@@ -186,6 +187,23 @@ function App() {
   const [customOpacity, setCustomOpacity] = useState<number>(savedPrefs?.customOpacity ?? 0.78)
   const [textColor, setTextColor] = useState<string>(savedPrefs?.textColor ?? '#1c1b1f')
 
+  // AutoStart Windows Startup State
+  const [autoStart, setAutoStart] = useState(false)
+
+  useEffect(() => {
+    if (window.widgetAPI?.getAutoStart) {
+      window.widgetAPI.getAutoStart().then((enabled) => setAutoStart(Boolean(enabled)))
+    }
+  }, [])
+
+  const handleToggleAutoStart = async () => {
+    if (window.widgetAPI?.setAutoStart) {
+      const nextState = !autoStart
+      const updated = await window.widgetAPI.setAutoStart(nextState)
+      setAutoStart(Boolean(updated))
+    }
+  }
+
   // UI Modals
   const [showSettings, setShowSettings] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
@@ -205,8 +223,17 @@ function App() {
   })
   const [weatherLoading, setWeatherLoading] = useState(false)
 
+  interface MediaTrack {
+    title: string
+    artist: string
+    app: string
+    isPlaying: boolean
+  }
+
   // Live Media State (Real Spotify / System Media)
-  const [mediaInfo, setMediaInfo] = useState({
+  const [tracksList, setTracksList] = useState<MediaTrack[]>([])
+  const [activeTrackIndex, setActiveTrackIndex] = useState(0)
+  const [mediaInfo, setMediaInfo] = useState<MediaTrack>({
     title: 'No media playing',
     artist: 'Spotify / Media Player',
     isPlaying: false,
@@ -305,18 +332,47 @@ function App() {
   // Listen to REAL Spotify / Windows System Media Updates via IPC
   useEffect(() => {
     if (window.widgetAPI?.onLiveMediaUpdate) {
-      window.widgetAPI.onLiveMediaUpdate((data) => {
-        if (data && data.title) {
+      window.widgetAPI.onLiveMediaUpdate((raw: any) => {
+        let items: any[] = []
+        if (Array.isArray(raw)) {
+          items = raw
+        } else if (raw && typeof raw === 'object' && raw.title) {
+          items = [raw]
+        }
+
+        const validTracks: MediaTrack[] = items
+          .filter((t) => t && t.title && t.title.trim())
+          .map((t) => ({
+            title: t.title.trim(),
+            artist: t.artist && t.artist.trim() ? t.artist.trim() : 'Media Player',
+            app: t.app || '',
+            isPlaying: t.status === 'Playing' || t.status === '1',
+          }))
+
+        setTracksList(validTracks)
+
+        if (validTracks.length > 0) {
+          const idx = activeTrackIndex % validTracks.length
+          setMediaInfo(validTracks[idx])
+        } else {
           setMediaInfo({
-            title: data.title,
-            artist: data.artist || 'Spotify',
-            isPlaying: data.status === 'Playing',
-            app: data.app || '',
+            title: 'No media playing',
+            artist: 'Spotify / Media Player',
+            isPlaying: false,
+            app: '',
           })
         }
       })
     }
-  }, [])
+  }, [activeTrackIndex])
+
+  const handleCycleTrack = () => {
+    if (tracksList.length > 1) {
+      const nextIdx = (activeTrackIndex + 1) % tracksList.length
+      setActiveTrackIndex(nextIdx)
+      setMediaInfo(tracksList[nextIdx])
+    }
+  }
 
   // Media Progress Simulation
   useEffect(() => {
@@ -705,6 +761,21 @@ function App() {
               </div>
             )}
 
+            {/* Windows Startup Option */}
+            <div className="settings-group">
+              <label className="settings-label">
+                <Power size={13} /> Windows Startup
+              </label>
+              <button
+                type="button"
+                className={`glass-pill-btn full-width ${autoStart ? 'active-accent' : ''}`}
+                onClick={handleToggleAutoStart}
+                title="Automatically launch DaylightWidget when Windows starts"
+              >
+                <Power size={12} /> {autoStart ? 'Run at Windows Startup: ENABLED' : 'Run at Windows Startup: DISABLED'}
+              </button>
+            </div>
+
             {/* Extra Controls */}
             <div className="drawer-footer-actions">
               <button className="glass-pill-btn sm danger" onClick={resetSettings}>
@@ -814,8 +885,21 @@ function App() {
 
             <div className="media-meta-text">
               <span className="media-title">{mediaInfo.title}</span>
-              <span className="media-artist">{mediaInfo.artist}</span>
+              <div className="media-artist-row">
+                <span className="media-artist">{mediaInfo.artist}</span>
+                {tracksList.length > 1 && (
+                  <span className="media-track-badge">
+                    {activeTrackIndex + 1}/{tracksList.length}
+                  </span>
+                )}
+              </div>
             </div>
+
+            {tracksList.length > 1 && (
+              <button className="media-cycle-arrow-btn" onClick={handleCycleTrack} title="Switch to next active media player">
+                <ChevronRight size={16} />
+              </button>
+            )}
 
             <button className="media-icon-btn" onClick={() => setIsMuted(!isMuted)}>
               {isMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}
