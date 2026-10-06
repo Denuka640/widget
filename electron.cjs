@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 
-// Ultra-low resource Chromium & V8 memory flags
+// Ultra-low resource Chromium & V8 memory flags - keep only necessary runs
 app.commandLine.appendSwitch('enable-low-end-device-mode');
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=64 --optimize-for-size');
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
@@ -12,6 +12,8 @@ app.commandLine.appendSwitch('disable-component-update');
 app.commandLine.appendSwitch('disable-background-networking');
 app.commandLine.appendSwitch('disable-speech-api');
 app.commandLine.appendSwitch('renderer-process-limit', '1');
+app.commandLine.appendSwitch('disable-http-cache');
+app.commandLine.appendSwitch('disable-site-isolation-trials');
 
 process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err);
@@ -38,21 +40,21 @@ const mediaScriptPath = fs.existsSync(path.join(appDir, 'scripts', 'get-media.ps
 
 app.setName('DaylightWidget');
 
-function startViteServer() {
-  const command = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-  const child = spawn(command, ['vite', '--host', '0.0.0.0'], {
-    cwd: appDir,
-    stdio: 'inherit',
-    shell: true,
-  });
-
-  child.on('exit', (code) => {
-    if (code !== 0) {
-      console.error('Vite dev server exited unexpectedly.');
+// Ensure the app automatically registers for Windows Startup on boot
+function ensureAutoStartOnStartup() {
+  if (!isWin) return;
+  try {
+    const loginItem = app.getLoginItemSettings();
+    if (!loginItem.openAtLogin) {
+      app.setLoginItemSettings({
+        openAtLogin: true,
+        path: process.execPath,
+        args: ['--autostart'],
+      });
     }
-  });
-
-  return child;
+  } catch (err) {
+    console.error('Failed to configure login item settings:', err);
+  }
 }
 
 const configPath = path.join(app.getPath('userData'), 'config.json');
@@ -135,7 +137,7 @@ function pollLiveMedia() {
     killed = true;
     try { ps.kill(); } catch {}
     isPollingMedia = false;
-  }, 4000);
+  }, 2500);
 
   ps.stdout.on('data', (d) => (out += d.toString()));
 
@@ -174,10 +176,6 @@ function createWindow() {
   const savedDisplayId = Object.keys(saved)[0];
   const targetDisplay = (savedDisplayId && screen.getAllDisplays().find(d => String(d.id) === String(savedDisplayId))) || primaryDisplay;
 
-  if (!hasBuiltApp) {
-    startViteServer();
-  }
-
   const displaySaved = saved[targetDisplay.id];
   const defaultWidth = displaySaved && typeof displaySaved.width === 'number' ? displaySaved.width : WIDGET_W;
   const defaultHeight = displaySaved && typeof displaySaved.height === 'number' ? displaySaved.height : WIDGET_H;
@@ -203,6 +201,8 @@ function createWindow() {
     alwaysOnTop: false,
     skipTaskbar: true,
     focusable: true,
+    minimizable: false, // Prevent window from being minimizable by OS
+    type: 'toolbar', // Tool window type on Windows prevents Show Desktop (Win+D) / Minimize All (Win+M) from minimizing the widget
     hasShadow: false,
     show: true,
     backgroundColor: '#00000000',
@@ -213,6 +213,36 @@ function createWindow() {
       backgroundThrottling: true,
       spellcheck: false,
     },
+  });
+
+  win.setMinimizable(false);
+
+  // Hook native Windows WM_SYSCOMMAND messages to suppress minimize (Win+D / Win+M / SC_MINIMIZE)
+  if (isWin) {
+    const WM_SYSCOMMAND = 0x0112;
+    const SC_MINIMIZE = 0xF020;
+    const SC_MAXIMIZE = 0xF030;
+    win.hookWindowMessage(WM_SYSCOMMAND, (wParam) => {
+      const wCmd = wParam & 0xFFF0;
+      if (wCmd === SC_MINIMIZE || wCmd === SC_MAXIMIZE) {
+        return true; // Block minimization and maximization attempts
+      }
+    });
+  }
+
+  // Fallback: If OS attempts minimize or hide, immediately restore and show window
+  win.on('minimize', (e) => {
+    e.preventDefault();
+    if (!win.isDestroyed()) {
+      win.restore();
+      win.show();
+    }
+  });
+
+  win.on('hide', () => {
+    if (!win.isDestroyed() && !win.isVisible()) {
+      win.show();
+    }
   });
 
   win._displayId = targetDisplay.id;
@@ -325,10 +355,11 @@ if (!gotLock) {
   app.quit();
 } else {
   app.whenReady().then(() => {
+    ensureAutoStartOnStartup();
     createWindow();
 
-    // Start live system media polling every 3 seconds
-    setInterval(pollLiveMedia, 3000);
+    // Live system media polling (5s interval to minimize CPU/runtime overhead)
+    setInterval(pollLiveMedia, 5000);
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
